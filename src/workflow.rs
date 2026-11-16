@@ -2,7 +2,10 @@
 //! say what claiming, completing and releasing do, and the transitions a plain
 //! update may make. Names are data; kinds are what the store understands.
 
+use devagotchi_contracts::BridgeResult;
 use serde::{Deserialize, Serialize};
+
+use crate::{Ticket, fail, invalid};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -213,4 +216,46 @@ impl Workflow {
         }
         Ok(())
     }
+}
+
+/// A plain update may only move an unheld ticket along a declared transition.
+pub(crate) fn check_transition(
+    workflow: &Workflow,
+    ticket: &Ticket,
+    to: &str,
+    actor: &str,
+) -> BridgeResult<()> {
+    let Some(target) = workflow.state(to) else {
+        return Err(invalid(format!("unknown state {to:?}")));
+    };
+    let held = ticket.holder.is_some() && !ticket.lease_expired;
+    if held || target.kind == StateKind::Active {
+        return Err(fail(
+            "use_lease_ops",
+            "held and active states change only through claim, complete, release or handoff",
+        ));
+    }
+    if !workflow.allows(&ticket.state, to) {
+        return Err(fail(
+            "transition_not_allowed",
+            format!(
+                "workflow {} has no transition {} -> {}",
+                workflow.id, ticket.state, to
+            ),
+        ));
+    }
+    if workflow
+        .lane_by_queue(&ticket.state)
+        .is_some_and(|l| l.distinct_from_previous)
+        && ticket.last_worker.as_deref() == Some(actor)
+    {
+        return Err(fail(
+            "distinct_required",
+            format!(
+                "you did the previous step; someone else must move it out of {}",
+                ticket.state
+            ),
+        ));
+    }
+    Ok(())
 }
