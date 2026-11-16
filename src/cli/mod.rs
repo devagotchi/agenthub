@@ -14,67 +14,50 @@
 //! there). Every command and every hook runs the same either way.
 
 use std::{
-    collections::BTreeMap,
     ffi::OsString,
     io::Write,
     path::{Path, PathBuf},
 };
 
 use devagotchi_contracts::{BridgeError, BridgeResult};
-use serde::{Deserialize, Serialize};
 
 use crate::{
-    Actor, AnchorPatch, Anchors, BOARD_DIR, BOARD_FILE, Board, DepKind, Filter, NewTicket,
-    NextFilter, Patch, ProjectConfig, Ticket, default_prefix,
+    Actor, AnchorPatch, BOARD_DIR, DepKind, Filter, NewTicket, NextFilter, Patch, ProjectConfig,
+    default_prefix,
     face::{Face, ME},
     open_project, read_project_config,
 };
+
 use bind::{bind, remote_face, unbind};
 use remote::Remote;
 
+mod args;
 mod bind;
+mod claims;
+mod errors;
 mod hooks;
 mod hub;
+mod init;
+mod output;
 mod remote;
+#[cfg(test)]
+mod tests;
 
+pub use args::USAGE;
+pub use errors::{
+    EXIT_CONFLICT, EXIT_NOT_FOUND, EXIT_OK, EXIT_REFUSED, EXIT_UNAVAILABLE, EXIT_USAGE,
+};
+pub use hooks::{HOOK_MARKER_IGNORE, HOOK_SCRIPTS, claude_code_hooks, codex_hooks, plugin_hooks};
 pub use hub::{Attached, Hub, Session, call};
+pub use init::{AGENT_WORKFLOW, AGENTS_MD_END, AGENTS_MD_START, PROTOCOL_LINE, agents_md_block};
 
-pub const USAGE: &str = "Usage: devagotchi board <command> [options]
-
-  init      [--project NAME] [--prefix P] [--agents-md]   create .devagotchi/ here; --agents-md appends the AGENTS.md block
-  bind      [--hub URL] [--project NAME] [--shared]   bind your account's board, or attach a granted configured shared board
-  unbind                           back to the local store (the hub keeps its board)
-  prime     [--limit N]            what to do now: held, ready, notes to you, the protocol (≤ 50 lines)
-  onboard                          print the AGENTS.md block
-  agent                            print the full workflow for an agent
-  ready     [--limit N]            tickets you could claim now, best first
-  ls        [--state S] [--label L] [--text T] [--open] [--limit N] [ANCHORS]
-  show      ID
-  new       TITLE [--desc D] [--priority N] [--label L]... [--parent ID] [--assign ID] [--found-in ID] [--epic] [ANCHORS]
-  claim     [ID] [--ttl SECONDS] [--label L] [--state S]   no ID: the best ready ticket
-  beat      [ID] [--progress JSON] [--fence N]   no ID: every ticket you hold (what the hook pack calls)
-  held                             the tickets you hold (empty output when none)
-  note      ID TEXT [--kind K] [--to ID] [--fence N]
-  done      ID [SUMMARY] [--fence N]
-  handoff   ID NOTE [--to ID] [--fence N]
-  release   ID [REASON] [--fence N]
-  force     ID REASON              a person takes a lease away
-  set       ID --version V [--title T] [--desc D] [--priority N] [--state S] [--assign ID|-] [ANCHORS]   an anchor of \"\" clears it
-  dep       ID --on ID [--kind blocks|parent|related|discovered-from|duplicates|supersedes] [--remove]
-  reap                             expire lapsed leases
-  verify                           recompute the event chain
-  settings  [--repo URL] [--env a,b,c]   the project's repo (https) and environments (1-20 lowercase names); none given: show them
-  export    [--out PATH]           board.jsonl (export, never the truth)
-  hooks     [--for claude-code|codex|all]   write compatibility launchers and print native lifecycle config (review/trust in the client)
-  hook      session-start|beat|stop|session-end   native client hook; bounded JSON on stdin, explicit failures
-            [--as auto] the agent is DEVAGOTCHI_ACTOR, else the plugin's client (claude, codex, grok)
-            [--if-board] outside a project with a board, answer {} and exit 0 (what the plugin runs)
-
-ANCHORS: --machine M --repo URL --env E --agent A --session S --fingerprint F   where a ticket belongs; on ls, filters
-Global: --dir PATH (project directory; default: walk up from here)  --as ID (act as this agent)
-        --json (also on when stdout is not a terminal)  --text (force the human form)  --quiet
-Bound project: every command above runs on the hub as the signed-in account; --as / DEVAGOTCHI_ACTOR is your seat there.
-Exit codes: 0 ok · 2 conflict (fence, version, held, blocked, WIP) · 3 refused · 4 not found · 5 board unavailable · 64 usage";
+use args::{Parsed, parse};
+use claims::{CachedClaim, ClaimCache, read_cache, write_cache};
+use errors::{
+    CommandResult, ErrorBody, ErrorOut, exit_code_for, next_for, no_id, usage_error, with_id,
+};
+use init::{LOCAL_GITIGNORE, init};
+use output::{Output, anchored, table, trim, write_json};
 
 /// Everything the command line needs from its environment, so tests can supply it.
 pub struct Invocation {
@@ -115,159 +98,6 @@ pub fn plugin_host(var: impl Fn(&str) -> Option<OsString>) -> Option<String> {
     }
 }
 
-/// What `.devagotchi/` keeps out of the repo: the store, the claim cache, the beat markers.
-const LOCAL_GITIGNORE: &str = "# the board itself is local state; board.jsonl is the export to commit if you want diffs\nboard.sqlite3\nboard.sqlite3-wal\nboard.sqlite3-shm\nclaims/\nhooks/.last-beat-*\n";
-
-pub const EXIT_OK: u8 = 0;
-pub const EXIT_CONFLICT: u8 = 2;
-pub const EXIT_REFUSED: u8 = 3;
-pub const EXIT_NOT_FOUND: u8 = 4;
-pub const EXIT_UNAVAILABLE: u8 = 5;
-pub const EXIT_USAGE: u8 = 64;
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct ClaimCache {
-    #[serde(default)]
-    claims: BTreeMap<String, CachedClaim>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CachedClaim {
-    fence: i64,
-    version: i64,
-    lease_expires_at: i64,
-}
-
-struct Parsed {
-    command: String,
-    positional: Vec<String>,
-    flags: BTreeMap<String, Vec<String>>,
-    switches: Vec<String>,
-}
-
-const VALUE_FLAGS: &[&str] = &[
-    "--dir",
-    "--as",
-    "--project",
-    "--prefix",
-    "--hub",
-    "--limit",
-    "--state",
-    "--label",
-    "--text",
-    "--desc",
-    "--priority",
-    "--parent",
-    "--assign",
-    "--found-in",
-    "--ttl",
-    "--progress",
-    "--fence",
-    "--kind",
-    "--to",
-    "--version",
-    "--title",
-    "--on",
-    "--out",
-    "--for",
-    "--machine",
-    "--repo",
-    "--env",
-    "--agent",
-    "--session",
-    "--fingerprint",
-];
-const SWITCHES: &[&str] = &[
-    "--json",
-    "--text",
-    "--quiet",
-    "--agents-md",
-    "--epic",
-    "--open",
-    "--remove",
-    "--shared",
-    "--if-board",
-];
-
-fn parse(args: &[OsString]) -> Result<Parsed, String> {
-    let mut command = None;
-    let mut positional = Vec::new();
-    let mut flags: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut switches = Vec::new();
-    let mut iter = args.iter();
-    while let Some(arg) = iter.next() {
-        let arg = arg.to_string_lossy().into_owned();
-        if arg == "--help" || arg == "-h" {
-            // Help wins wherever it appears: `board --help`, `board claim --help`.
-            command = Some("help".into());
-            continue;
-        }
-        if let Some(stripped) = arg.strip_prefix("--") {
-            let name = format!("--{}", stripped.split('=').next().unwrap_or(""));
-            if SWITCHES.contains(&name.as_str()) {
-                switches.push(name);
-            } else if VALUE_FLAGS.contains(&name.as_str()) {
-                let value = match arg.split_once('=') {
-                    Some((_, v)) => v.to_string(),
-                    None => iter
-                        .next()
-                        .map(|v| v.to_string_lossy().into_owned())
-                        .ok_or_else(|| format!("{name} needs a value"))?,
-                };
-                flags.entry(name).or_default().push(value);
-            } else {
-                return Err(format!("unknown option {name}"));
-            }
-        } else if command.is_none() {
-            command = Some(arg);
-        } else {
-            positional.push(arg);
-        }
-    }
-    Ok(Parsed {
-        command: command.unwrap_or_else(|| "help".into()),
-        positional,
-        flags,
-        switches,
-    })
-}
-
-impl Parsed {
-    fn flag(&self, name: &str) -> Option<&str> {
-        self.flags
-            .get(name)
-            .and_then(|v| v.last())
-            .map(String::as_str)
-    }
-    fn flag_all(&self, name: &str) -> Vec<String> {
-        self.flags.get(name).cloned().unwrap_or_default()
-    }
-    fn switch(&self, name: &str) -> bool {
-        self.switches.iter().any(|s| s == name)
-    }
-    /// The anchor flags, as given.
-    fn anchors(&self) -> Anchors {
-        let get = |name: &str| self.flag(name).map(str::to_string);
-        Anchors {
-            machine: get("--machine"),
-            repo: get("--repo"),
-            environment: get("--env"),
-            agent: get("--agent"),
-            session: get("--session"),
-            fingerprint: get("--fingerprint"),
-        }
-    }
-    fn int(&self, name: &str) -> Result<Option<i64>, String> {
-        match self.flag(name) {
-            None => Ok(None),
-            Some(v) => v
-                .parse::<i64>()
-                .map(Some)
-                .map_err(|_| format!("{name} must be an integer")),
-        }
-    }
-}
-
 /// Walk up from `start` to the first directory holding `.devagotchi/config.json`.
 pub fn find_project_dir(start: &Path) -> Option<PathBuf> {
     let mut dir = Some(start.to_path_buf());
@@ -280,140 +110,6 @@ pub fn find_project_dir(start: &Path) -> Option<PathBuf> {
         dir = d.parent().map(Path::to_path_buf);
     }
     None
-}
-
-fn exit_code_for(code: &str) -> u8 {
-    match code {
-        "stale_fence" | "version_conflict" | "held_by_other" | "lease_expired" | "not_holder"
-        | "wip_limit" | "blocked" | "distinct_required" | "dependency_cycle" | "not_held" => {
-            EXIT_CONFLICT
-        }
-        "not_found" => EXIT_NOT_FOUND,
-        "board_store" | "board_open" | "board_mismatch" | "board_version" | "board_random"
-        | "board_id" | "no_board" | "board_io" | "hub_unreachable" | "hub_error" => {
-            EXIT_UNAVAILABLE
-        }
-        "usage" => EXIT_USAGE,
-        _ => EXIT_REFUSED,
-    }
-}
-
-fn next_for(code: &str, id: Option<&str>) -> String {
-    let id = id.unwrap_or("<id>");
-    match code {
-        "not_signed_in" | "signed_out" => {
-            "devagotchi login (this project's board is on the hub); board unbind to work locally".into()
-        }
-        "hub_unreachable" => "retry when the hub answers; board unbind to work locally".into(),
-        "not_offered" | "plan_limit" | "name_taken" => {
-            "devagotchi whoami lists your boards there; bind another name, or ask the hub's operator".into()
-        }
-        "stale_fence" | "lease_expired" | "not_holder" => {
-            format!("board show {id} — see who holds it; board claim {id} to take it if it is free")
-        }
-        "held_by_other" => {
-            format!("board show {id}; wait, or board claim with no id for another ticket")
-        }
-        "version_conflict" => {
-            format!("board show {id} --json and retry set with the current version")
-        }
-        "wip_limit" => "board done / handoff / release one of the tickets you hold first".into(),
-        "blocked" => format!("board show {id} — finish or hand off the blockers it lists"),
-        "distinct_required" => "someone else must take this lane; leave it for them".into(),
-        "not_claimable" => format!(
-            "board show {id} — only a lane queue is claimable; a person moves it with board set"
-        ),
-        "use_lease_ops" => {
-            "use claim / done / handoff / release; held tickets do not move by set".into()
-        }
-        "transition_not_allowed" => "board agent lists the transitions the workflow allows".into(),
-        "humans_only" => {
-            "ask the person who owns this board; run without --as to act as yourself".into()
-        }
-        "not_owner" => {
-            "only the account that owns this board, or a person granted on it, changes its settings; ask them".into()
-        }
-        "not_found" => "board ls --open to see the ids on this board".into(),
-        "no_board" => "run board init in the project directory, or pass --dir".into(),
-        "usage" => "board --help".into(),
-        _ => "board --help".into(),
-    }
-}
-
-#[derive(Serialize)]
-struct ErrorOut<'a> {
-    error: ErrorBody<'a>,
-}
-
-#[derive(Serialize)]
-struct ErrorBody<'a> {
-    code: &'a str,
-    message: &'a str,
-    next: String,
-}
-
-struct Output<'a> {
-    json: bool,
-    quiet: bool,
-    out: &'a mut dyn Write,
-    err: &'a mut dyn Write,
-}
-
-impl Output<'_> {
-    fn value(&mut self, value: &impl Serialize, text: impl FnOnce() -> String) {
-        if self.json {
-            let _ = writeln!(
-                self.out,
-                "{}",
-                serde_json::to_string(value).unwrap_or_default()
-            );
-        } else if !self.quiet {
-            let _ = writeln!(self.out, "{}", text());
-        }
-    }
-
-    fn lines(&mut self, text: &str) {
-        if !self.quiet {
-            let _ = writeln!(self.out, "{text}");
-        }
-    }
-
-    fn error(&mut self, error: &BridgeError, id: Option<&str>) -> u8 {
-        let next = match (error.code.as_str(), error.message.rsplit_once(": ")) {
-            // The store's message ends with the board's environments: name them in `next`.
-            ("unknown_environment", Some((_, list))) => {
-                format!(
-                    "pass --env with one of this board's environments ({list}), or leave it out"
-                )
-            }
-            // The store's message is what is wrong and how to give it: it is the hint.
-            ("invalid_settings", _) => {
-                format!("{}, then run board settings again", error.message)
-            }
-            _ => next_for(&error.code, id),
-        };
-        if self.json {
-            let body = ErrorOut {
-                error: ErrorBody {
-                    code: &error.code,
-                    message: &error.message,
-                    next: next.clone(),
-                },
-            };
-            let _ = writeln!(
-                self.out,
-                "{}",
-                serde_json::to_string(&body).unwrap_or_default()
-            );
-        } else {
-            let _ = writeln!(
-                self.err,
-                "error {}: {}\n  next: {}",
-                error.code, error.message, next
-            );
-        }
-        exit_code_for(&error.code)
-    }
 }
 
 /// Run one invocation. Returns the process exit code; writes to `out` and `err`.
@@ -593,112 +289,6 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
-}
-
-type CommandResult = Result<u8, (BridgeError, Option<String>)>;
-
-fn usage_error(message: impl Into<String>) -> (BridgeError, Option<String>) {
-    (BridgeError::new("usage", message), None)
-}
-
-fn with_id<T>(id: &str, result: BridgeResult<T>) -> Result<T, (BridgeError, Option<String>)> {
-    result.map_err(|error| (error, Some(id.to_string())))
-}
-
-fn no_id<T>(result: BridgeResult<T>) -> Result<T, (BridgeError, Option<String>)> {
-    result.map_err(|error| (error, None))
-}
-
-fn init(parsed: &Parsed, invocation: &Invocation, output: &mut Output<'_>) -> u8 {
-    let project_dir = parsed
-        .flag("--dir")
-        .map(|d| invocation.cwd.join(d))
-        .unwrap_or_else(|| invocation.cwd.clone());
-    let board_dir = project_dir.join(BOARD_DIR);
-    let existing = read_project_config(&board_dir).ok();
-    let project = parsed
-        .flag("--project")
-        .map(str::to_string)
-        .or_else(|| existing.as_ref().map(|c| c.project.clone()))
-        .or_else(|| {
-            project_dir
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "project".into());
-    let prefix = parsed
-        .flag("--prefix")
-        .map(str::to_string)
-        .or_else(|| existing.as_ref().map(|c| c.prefix.clone()))
-        .unwrap_or_else(|| default_prefix(&project));
-    if let Err(error) = std::fs::create_dir_all(&board_dir) {
-        return output.error(&BridgeError::new("board_io", error.to_string()), None);
-    }
-    let board = match Board::open(&board_dir.join(BOARD_FILE), &project) {
-        Ok(b) => b,
-        Err(error) => return output.error(&error, None),
-    };
-    let config = ProjectConfig {
-        project: project.clone(),
-        prefix: board.prefix().to_string(),
-        created_at: existing
-            .as_ref()
-            .map(|c| c.created_at)
-            .unwrap_or_else(|| board.now()),
-        hub: existing.and_then(|c| c.hub),
-    };
-    if prefix != config.prefix {
-        output.lines(&format!(
-            "note: this board already uses prefix {}; --prefix {} ignored",
-            config.prefix, prefix
-        ));
-    }
-    if let Err(error) = write_json(&board_dir.join("config.json"), &config) {
-        return output.error(&error, None);
-    }
-    let gitignore = board_dir.join(".gitignore");
-    if !gitignore.exists() {
-        let _ = std::fs::write(&gitignore, LOCAL_GITIGNORE);
-    }
-    let mut agents_md = "unchanged";
-    if parsed.switch("--agents-md") {
-        let path = project_dir.join("AGENTS.md");
-        let current = std::fs::read_to_string(&path).unwrap_or_default();
-        if current.contains(AGENTS_MD_START) {
-            agents_md = "already present";
-        } else {
-            let mut next = current;
-            if !next.is_empty() && !next.ends_with('\n') {
-                next.push('\n');
-            }
-            if !next.is_empty() {
-                next.push('\n');
-            }
-            next.push_str(&agents_md_block());
-            if let Err(error) = std::fs::write(&path, next) {
-                return output.error(&BridgeError::new("board_io", error.to_string()), None);
-            }
-            agents_md = "block appended";
-        }
-    }
-    output.value(
-        &serde_json::json!({
-            "project": config.project,
-            "prefix": config.prefix,
-            "board": board_dir.join(BOARD_FILE),
-            "agents_md": agents_md,
-        }),
-        || {
-            format!(
-                "board ready: {} (ids {}-…)\n  {}\n  AGENTS.md: {}\n  next: devagotchi board prime — or board onboard to paste the block elsewhere",
-                config.project,
-                config.prefix,
-                board_dir.join(BOARD_FILE).display(),
-                agents_md
-            )
-        },
-    );
-    EXIT_OK
 }
 
 fn dispatch(
@@ -1275,198 +865,3 @@ fn dispatch(
         other => Err(usage_error(format!("unknown command {other}"))),
     }
 }
-
-/// A prime row's anchor line, after the title on the same row (prime stays under 50 lines).
-fn anchored(anchors: &Option<String>) -> String {
-    anchors
-        .as_deref()
-        .map(|line| format!("  · {line}"))
-        .unwrap_or_default()
-}
-
-fn table(tickets: &[Ticket]) -> String {
-    if tickets.is_empty() {
-        return "(none)".into();
-    }
-    tickets
-        .iter()
-        .map(|t| {
-            format!(
-                "{:<14} {:<16} P{} {:<10} {}",
-                t.id,
-                t.state,
-                t.priority,
-                t.holder.as_deref().unwrap_or("-"),
-                trim(&t.title, 70)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn trim(text: &str, max: usize) -> String {
-    let one_line = text.lines().next().unwrap_or("");
-    if one_line.chars().count() <= max {
-        one_line.to_string()
-    } else {
-        format!("{}…", one_line.chars().take(max - 1).collect::<String>())
-    }
-}
-
-fn write_json(path: &Path, value: &impl Serialize) -> BridgeResult<()> {
-    let text = serde_json::to_string_pretty(value)
-        .map_err(|e| BridgeError::new("board_io", e.to_string()))?;
-    std::fs::write(path, text + "\n")
-        .map_err(|e| BridgeError::new("board_io", format!("{}: {e}", path.display())))
-}
-
-fn cache_path(board_dir: &Path, actor: &str) -> PathBuf {
-    let safe: String = actor
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    board_dir.join("claims").join(format!("{safe}.json"))
-}
-
-fn read_cache(board_dir: &Path, actor: &str) -> ClaimCache {
-    std::fs::read_to_string(cache_path(board_dir, actor))
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
-}
-
-fn write_cache(board_dir: &Path, actor: &str, cache: &ClaimCache) {
-    let path = cache_path(board_dir, actor);
-    if cache.claims.is_empty() {
-        let _ = std::fs::remove_file(&path);
-        return;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = write_json(&path, cache);
-}
-
-/// Legacy Unix launch paths delegate all behavior and error handling to the native command.
-pub const HOOK_MARKER_IGNORE: &str = "hooks/.last-beat-*";
-
-pub const HOOK_SCRIPTS: &[(&str, &str)] = &[
-    (
-        "session-start.sh",
-        "#!/bin/sh
-exec \"${DEVAGOTCHI:-devagotchi}\" board hook session-start --dir \"$(dirname \"$0\")/../..\" --as \"${1:-${DEVAGOTCHI_ACTOR:-claude}}\"
-",
-    ),
-    (
-        "beat.sh",
-        "#!/bin/sh
-exec \"${DEVAGOTCHI:-devagotchi}\" board hook beat --dir \"$(dirname \"$0\")/../..\" --as \"${1:-${DEVAGOTCHI_ACTOR:-claude}}\"
-",
-    ),
-    (
-        "stop.sh",
-        "#!/bin/sh
-exec \"${DEVAGOTCHI:-devagotchi}\" board hook stop --dir \"$(dirname \"$0\")/../..\" --as \"${1:-${DEVAGOTCHI_ACTOR:-claude}}\"
-",
-    ),
-];
-
-fn hook_command(phase: &str, actor: &str) -> String {
-    format!("devagotchi board hook {phase} --as {actor}")
-}
-
-/// Claude Code's `hooks` block: SessionStart stdout is added to the context, PostToolUse
-/// runs after every tool, Stop exit 2 blocks the stop with stderr shown to the model.
-pub fn claude_code_hooks() -> String {
-    serde_json::to_string_pretty(&serde_json::json!({
-        "hooks": {
-            "SessionStart": [{ "hooks": [{ "type": "command", "command": hook_command("session-start", "claude"), "timeout": 30 }] }],
-            "PostToolUse": [{ "matcher": "", "hooks": [{ "type": "command", "command": hook_command("beat", "claude"), "timeout": 30 }] }],
-            "Stop": [{ "hooks": [{ "type": "command", "command": hook_command("stop", "claude"), "timeout": 30 }] }],
-            "SessionEnd": [{ "hooks": [{ "type": "command", "command": hook_command("session-end", "claude"), "timeout": 30 }] }]
-        }
-    }))
-    .expect("hooks json")
-}
-
-/// Codex's current hooks.json schema; project and exact definitions must be trusted.
-pub fn codex_hooks() -> String {
-    serde_json::to_string_pretty(&serde_json::json!({
-        "hooks": {
-            "SessionStart": [{ "hooks": [{ "type": "command", "command": hook_command("session-start", "codex"), "timeout": 30 }] }],
-            "PostToolUse": [{ "matcher": "", "hooks": [{ "type": "command", "command": hook_command("beat", "codex"), "timeout": 30 }] }],
-            "Stop": [{ "hooks": [{ "type": "command", "command": hook_command("stop", "codex"), "timeout": 30 }] }],
-            "SessionEnd": [{ "hooks": [{ "type": "command", "command": hook_command("session-end", "codex"), "timeout": 30 }] }]
-        }
-    }))
-    .expect("hooks json")
-}
-
-/// The hooks the `devagotchi-agenthub` plugin ships (`plugins/devagotchi-agenthub/hooks/hooks.json`,
-/// held to this by a test): the same four as [`claude_code_hooks`], for whichever client runs
-/// the plugin (`--as auto`), and silent in a project with no board (`--if-board`).
-pub fn plugin_hooks() -> String {
-    let command = |phase: &str| format!("devagotchi board hook {phase} --as auto --if-board");
-    serde_json::to_string_pretty(&serde_json::json!({
-        "hooks": {
-            "SessionStart": [{ "hooks": [{ "type": "command", "command": command("session-start"), "timeout": 30 }] }],
-            "PostToolUse": [{ "matcher": "", "hooks": [{ "type": "command", "command": command("beat"), "timeout": 30 }] }],
-            "Stop": [{ "hooks": [{ "type": "command", "command": command("stop"), "timeout": 30 }] }],
-            "SessionEnd": [{ "hooks": [{ "type": "command", "command": command("session-end"), "timeout": 30 }] }]
-        }
-    }))
-    .expect("hooks json")
-}
-
-pub use crate::PROTOCOL_LINE;
-
-pub const AGENTS_MD_START: &str = "<!-- devagotchi-board:start -->";
-pub const AGENTS_MD_END: &str = "<!-- devagotchi-board:end -->";
-
-pub fn agents_md_block() -> String {
-    format!(
-        "{AGENTS_MD_START}
-## Board
-
-This project's tickets live in `.devagotchi/board.sqlite3` (the agents' board; contract in the
-devagotchi repository, `docs/agent-board.md`). Work from the board, not from memory:
-
-- Start every session with `devagotchi board prime` (set `DEVAGOTCHI_ACTOR=<your-name>` first,
-  for example `claude`, `codex`, `gemini`, `cursor`, `grok`): it lists what you hold, what is ready
-  for you, and notes addressed to you.
-- Take work with `board claim` (or `board claim <id>`), heartbeat with `board beat <id>` at least as
-  often as `prime` says, record what you learn with `board note <id> \"…\"`, finish with
-  `board done <id> \"summary\"`, or `board handoff <id> \"note\" --to <who>` when someone else must
-  continue. Work you discover goes on the board: `board new \"title\" --found-in <id>`.
-- Never stop while you hold a ticket: hand it off or finish it. Reviewers are never the author.
-- Every command takes `--json`; errors carry a `next` field that says what to run.
-{AGENTS_MD_END}"
-    )
-}
-
-pub const AGENT_WORKFLOW: &str = "The board workflow for an agent
-
-1. prime      devagotchi board prime                what you hold, what is ready for you, notes to you
-2. claim      board claim [<id>]                   a lease with a fence; re-claiming what you hold is free
-3. work       board beat <id> [--progress '{...}']  before the heartbeat interval runs out, every time
-              board note <id> \"what you learned\"  notes are append-only and travel with the ticket
-              board new \"title\" --found-in <id>   work you discovered, linked back, never silently done
-4. finish     board done <id> \"summary\"           → the next lane (review); someone else reviews
-   or hand off board handoff <id> \"note\" --to <who>
-   or release board release <id> \"reason\"         back to the queue, nothing recorded as done
-5. blocked?   board dep <id> --on <other>           readiness follows `blocks` dependencies
-              board set <id> --version V --state blocked   a person moves tickets by hand
-
-Rules the store enforces, not you: a stale fence is refused (your lease lapsed; claim again);
-the reviewer must differ from the author; a lapsed lease goes back to the queue, three lapses
-send the ticket to a person; WIP is limited; states change only through these verbs.
-Exit codes: 0 ok · 2 conflict · 3 refused · 4 not found · 5 board unavailable · 64 usage.";
-
-#[cfg(test)]
-mod tests;

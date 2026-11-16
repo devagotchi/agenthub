@@ -3,11 +3,16 @@ use std::{
     path::Path,
 };
 
+use serde::Deserialize;
+use serde_json::json;
+
 use super::{
     Actor, BridgeError, BridgeResult, EXIT_CONFLICT, EXIT_OK, EXIT_UNAVAILABLE, Face, Output,
 };
-use serde::Deserialize;
-use serde_json::json;
+
+mod install;
+
+pub use install::{HOOK_MARKER_IGNORE, HOOK_SCRIPTS, claude_code_hooks, codex_hooks, plugin_hooks};
 
 const MAX_INPUT: usize = 256 * 1024;
 const MAX_CONTEXT: usize = 256 * 1024;
