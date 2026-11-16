@@ -1,8 +1,9 @@
 //! The standalone board's SQLite schema, its version and the upgrades from earlier boards.
 
+use std::cell::Cell;
+
 use devagotchi_contracts::BridgeResult;
 use rusqlite::{Connection, TransactionBehavior, params};
-use std::cell::Cell;
 
 use crate::{Workflow, Writer, load_workflow, store_error};
 

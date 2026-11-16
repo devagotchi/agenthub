@@ -3,8 +3,9 @@
 use devagotchi_contracts::BridgeResult;
 use rusqlite::Connection;
 
-use super::rows::TICKET_COLUMNS;
 use crate::{Filter, Ticket, Workflow, clean_anchor, open_blockers, store_error, ticket_from_row};
+
+use super::rows::TICKET_COLUMNS;
 
 /// Candidates in queue order, then the filters SQL cannot express (readiness needs
 /// the workflow and the dependency graph), bounded by `limit`.

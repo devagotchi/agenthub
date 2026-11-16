@@ -1,13 +1,14 @@
 //! A board: one project's tickets, standalone in SQLite or hosted in Postgres, and the
 //! accessors and write path every operation shares.
 
-use devagotchi_contracts::BridgeResult;
-use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::{
     cell::Cell,
     path::Path,
     sync::{Arc, Mutex},
 };
+
+use devagotchi_contracts::BridgeResult;
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use tokio::sync::{Notify, watch};
 
 use crate::{

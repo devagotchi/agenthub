@@ -1,9 +1,10 @@
 //! The hash chain every board write extends: the writer that appends an event, the genesis link and the hash.
 
+use std::cell::Cell;
+
 use devagotchi_contracts::BridgeResult;
 use rusqlite::{OptionalExtension, Row, Transaction, params};
 use sha2::{Digest, Sha256};
-use std::cell::Cell;
 
 use crate::{Event, fail, store_error};
 
