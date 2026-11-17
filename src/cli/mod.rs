@@ -36,6 +36,7 @@ mod bind;
 mod hooks;
 mod hub;
 mod remote;
+mod scan;
 
 pub use hub::{Attached, Hub, Session, call};
 
@@ -65,6 +66,7 @@ pub const USAGE: &str = "Usage: devagotchi board <command> [options]
   verify                           recompute the event chain
   settings  [--repo URL] [--env a,b,c]   the project's repo (https) and environments (1-20 lowercase names); none given: show them
   export    [--out PATH]           board.jsonl (export, never the truth)
+  scan      [PATH] [--import]      the plans, checklists and TODOs here (PATH: a folder or a file) as tickets: a preview; --import adds the new ones
   hooks     [--for claude-code|codex|all]   write compatibility launchers and print native lifecycle config (review/trust in the client)
   hook      session-start|beat|stop|session-end   native client hook; bounded JSON on stdin, explicit failures
             [--as auto] the agent is DEVAGOTCHI_ACTOR, else the plugin's client (claude, codex, grok)
@@ -187,6 +189,7 @@ const SWITCHES: &[&str] = &[
     "--remove",
     "--shared",
     "--if-board",
+    "--import",
 ];
 
 fn parse(args: &[OsString]) -> Result<Parsed, String> {
@@ -956,6 +959,7 @@ fn dispatch(
             });
             Ok(EXIT_OK)
         }
+        "scan" => scan::run(parsed, board, actor, board_dir, output),
         "new" => {
             let title = need(0, "TITLE")?.to_string();
             let ticket = no_id(board.create(

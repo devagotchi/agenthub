@@ -1,0 +1,47 @@
+[
+  {
+    "name": "ai-plans",
+    "label": "ai-plans",
+    "under": [
+      ".ai/"
+    ],
+    "ext": [
+      "md"
+    ],
+    "kind": "markdown",
+    "table": {
+      "status": [
+        "state",
+        "status",
+        "in the code today"
+      ],
+      "open": [
+        "not started",
+        "todo",
+        "to do",
+        "open",
+        "in progress",
+        "pending",
+        "planned",
+        "blocked",
+        "absent",
+        "partial",
+        "needs the operator",
+        "waiting on",
+        "waits on"
+      ],
+      "title": [
+        "task",
+        "tasks",
+        "feature",
+        "title",
+        "item"
+      ],
+      "id": [
+        "#",
+        "id",
+        "milestone"
+      ]
+    }
+  }
+]

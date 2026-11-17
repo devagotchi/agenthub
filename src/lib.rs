@@ -16,6 +16,7 @@ pub mod issue_lifecycle;
 mod lease;
 pub mod migrations;
 mod project;
+pub mod scan;
 pub mod wake;
 pub mod welcome;
 pub mod workflow;
