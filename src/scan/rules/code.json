@@ -1,0 +1,1 @@
+[{"name": "code-markers", "label": "todo", "ext": ["rs", "py", "ts", "tsx", "js", "jsx", "mjs", "cjs", "go", "java", "kt", "swift", "c", "h", "cc", "cpp", "hpp", "cs", "rb", "php", "sh", "bash", "ps1", "sql", "lua", "dart", "scala", "vue", "svelte", "toml", "yaml", "yml"], "kind": "marker", "markers": ["TODO", "FIXME", "HACK", "XXX"]}]

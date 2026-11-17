@@ -322,3 +322,4 @@ fn exit_codes_and_next_hints_by_failure_class() {
 }
 
 mod output;
+mod scan;

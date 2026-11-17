@@ -9,6 +9,7 @@
 pub mod approval;
 pub mod cli;
 pub mod clickhouse;
+mod clock;
 pub mod face;
 pub mod hosted;
 pub mod inbox;
@@ -16,6 +17,7 @@ pub mod issue_lifecycle;
 mod lease;
 pub mod migrations;
 mod project;
+pub mod scan;
 pub mod wake;
 pub mod welcome;
 pub mod workflow;
@@ -24,7 +26,6 @@ use std::{
     cell::Cell,
     path::Path,
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use devagotchi_contracts::{BridgeError, BridgeResult};
@@ -34,21 +35,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::{Notify, watch};
 
+pub use clock::{Clock, system_clock, utc};
 pub use lease::{Lease, NextFilter};
 pub use project::*;
 pub use workflow::{StateKind, Workflow};
-
-/// Milliseconds since the Unix epoch. Injected so tests can move time.
-pub type Clock = Arc<dyn Fn() -> i64 + Send + Sync>;
-
-pub fn system_clock() -> Clock {
-    Arc::new(|| {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or_default()
-    })
-}
 
 /// Who is acting. Identity comes from the hub's authentication, never from a tool
 /// argument; `human` gates force-release; `wip_limit` overrides the board default.
@@ -512,26 +502,6 @@ pub fn valid_name(name: &str) -> bool {
         && bytes
             .iter()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || *b == b'-')
-}
-
-/// Unix seconds as `YYYY-MM-DD HH:MM UTC` (civil-from-days, H. Hinnant).
-pub fn utc(secs: u64) -> String {
-    let days = (secs / 86_400) as i64;
-    let rem = secs % 86_400;
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02} UTC",
-        rem / 3600,
-        rem % 3600 / 60
-    )
 }
 
 pub const SCHEMA_VERSION: i64 = 2;

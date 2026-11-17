@@ -1,0 +1,13 @@
+[
+  {
+    "name": "spec-kit-tasks",
+    "label": "spec-kit",
+    "under": [
+      "specs/"
+    ],
+    "names": [
+      "tasks.md"
+    ],
+    "kind": "markdown"
+  }
+]

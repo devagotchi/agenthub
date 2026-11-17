@@ -1,0 +1,43 @@
+[
+  {
+    "name": "cursor-plans",
+    "label": "cursor",
+    "under": [
+      ".cursor/plans/"
+    ],
+    "ext": [
+      "md"
+    ],
+    "kind": "markdown",
+    "table": {
+      "status": [
+        "status",
+        "state"
+      ],
+      "open": [
+        "not started",
+        "todo",
+        "to do",
+        "open",
+        "in progress",
+        "pending",
+        "planned",
+        "blocked",
+        "absent",
+        "partial"
+      ],
+      "title": [
+        "task",
+        "tasks",
+        "feature",
+        "title",
+        "item"
+      ],
+      "id": [
+        "#",
+        "id",
+        "milestone"
+      ]
+    }
+  }
+]
