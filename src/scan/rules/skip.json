@@ -1,0 +1,17 @@
+[
+  {
+    "name": "templates-and-changelogs",
+    "label": "skip",
+    "names": [
+      "TEMPLATE.md",
+      "template.md",
+      "PULL_REQUEST_TEMPLATE.md",
+      "pull_request_template.md",
+      "ISSUE_TEMPLATE.md",
+      "CHANGELOG.md",
+      "CHANGES.md",
+      "HISTORY.md"
+    ],
+    "kind": "skip"
+  }
+]

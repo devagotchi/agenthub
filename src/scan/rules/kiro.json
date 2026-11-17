@@ -1,0 +1,13 @@
+[
+  {
+    "name": "kiro-tasks",
+    "label": "kiro",
+    "under": [
+      ".kiro/specs/"
+    ],
+    "names": [
+      "tasks.md"
+    ],
+    "kind": "markdown"
+  }
+]

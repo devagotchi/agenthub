@@ -21,7 +21,7 @@ use std::{
 };
 
 use devagotchi_contracts::{BridgeError, BridgeResult};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::{
     Actor, AnchorPatch, Anchors, BOARD_DIR, BOARD_FILE, Board, DepKind, Filter, NewTicket,
@@ -30,12 +30,15 @@ use crate::{
     open_project, read_project_config,
 };
 use bind::{bind, remote_face, unbind};
+use claims::{CachedClaim, ClaimCache, read_cache, write_cache};
 use remote::Remote;
 
 mod bind;
+mod claims;
 mod hooks;
 mod hub;
 mod remote;
+mod scan;
 
 pub use hub::{Attached, Hub, Session, call};
 
@@ -65,6 +68,7 @@ pub const USAGE: &str = "Usage: devagotchi board <command> [options]
   verify                           recompute the event chain
   settings  [--repo URL] [--env a,b,c]   the project's repo (https) and environments (1-20 lowercase names); none given: show them
   export    [--out PATH]           board.jsonl (export, never the truth)
+  scan      [PATH] [--import]      the plans, checklists and TODOs here (PATH: a folder or a file) as tickets: a preview; --import adds the new ones
   hooks     [--for claude-code|codex|all]   write compatibility launchers and print native lifecycle config (review/trust in the client)
   hook      session-start|beat|stop|session-end   native client hook; bounded JSON on stdin, explicit failures
             [--as auto] the agent is DEVAGOTCHI_ACTOR, else the plugin's client (claude, codex, grok)
@@ -125,19 +129,6 @@ pub const EXIT_NOT_FOUND: u8 = 4;
 pub const EXIT_UNAVAILABLE: u8 = 5;
 pub const EXIT_USAGE: u8 = 64;
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct ClaimCache {
-    #[serde(default)]
-    claims: BTreeMap<String, CachedClaim>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CachedClaim {
-    fence: i64,
-    version: i64,
-    lease_expires_at: i64,
-}
-
 struct Parsed {
     command: String,
     positional: Vec<String>,
@@ -187,6 +178,7 @@ const SWITCHES: &[&str] = &[
     "--remove",
     "--shared",
     "--if-board",
+    "--import",
 ];
 
 fn parse(args: &[OsString]) -> Result<Parsed, String> {
@@ -956,6 +948,7 @@ fn dispatch(
             });
             Ok(EXIT_OK)
         }
+        "scan" => scan::run(parsed, board, actor, board_dir, output),
         "new" => {
             let title = need(0, "TITLE")?.to_string();
             let ticket = no_id(board.create(
@@ -1318,39 +1311,6 @@ fn write_json(path: &Path, value: &impl Serialize) -> BridgeResult<()> {
         .map_err(|e| BridgeError::new("board_io", e.to_string()))?;
     std::fs::write(path, text + "\n")
         .map_err(|e| BridgeError::new("board_io", format!("{}: {e}", path.display())))
-}
-
-fn cache_path(board_dir: &Path, actor: &str) -> PathBuf {
-    let safe: String = actor
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    board_dir.join("claims").join(format!("{safe}.json"))
-}
-
-fn read_cache(board_dir: &Path, actor: &str) -> ClaimCache {
-    std::fs::read_to_string(cache_path(board_dir, actor))
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
-}
-
-fn write_cache(board_dir: &Path, actor: &str, cache: &ClaimCache) {
-    let path = cache_path(board_dir, actor);
-    if cache.claims.is_empty() {
-        let _ = std::fs::remove_file(&path);
-        return;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = write_json(&path, cache);
 }
 
 /// Legacy Unix launch paths delegate all behavior and error handling to the native command.
