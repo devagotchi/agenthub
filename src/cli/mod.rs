@@ -21,7 +21,7 @@ use std::{
 };
 
 use devagotchi_contracts::{BridgeError, BridgeResult};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::{
     Actor, AnchorPatch, Anchors, BOARD_DIR, BOARD_FILE, Board, DepKind, Filter, NewTicket,
@@ -30,9 +30,11 @@ use crate::{
     open_project, read_project_config,
 };
 use bind::{bind, remote_face, unbind};
+use claims::{CachedClaim, ClaimCache, read_cache, write_cache};
 use remote::Remote;
 
 mod bind;
+mod claims;
 mod hooks;
 mod hub;
 mod remote;
@@ -126,19 +128,6 @@ pub const EXIT_REFUSED: u8 = 3;
 pub const EXIT_NOT_FOUND: u8 = 4;
 pub const EXIT_UNAVAILABLE: u8 = 5;
 pub const EXIT_USAGE: u8 = 64;
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct ClaimCache {
-    #[serde(default)]
-    claims: BTreeMap<String, CachedClaim>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CachedClaim {
-    fence: i64,
-    version: i64,
-    lease_expires_at: i64,
-}
 
 struct Parsed {
     command: String,
@@ -1322,39 +1311,6 @@ fn write_json(path: &Path, value: &impl Serialize) -> BridgeResult<()> {
         .map_err(|e| BridgeError::new("board_io", e.to_string()))?;
     std::fs::write(path, text + "\n")
         .map_err(|e| BridgeError::new("board_io", format!("{}: {e}", path.display())))
-}
-
-fn cache_path(board_dir: &Path, actor: &str) -> PathBuf {
-    let safe: String = actor
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    board_dir.join("claims").join(format!("{safe}.json"))
-}
-
-fn read_cache(board_dir: &Path, actor: &str) -> ClaimCache {
-    std::fs::read_to_string(cache_path(board_dir, actor))
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
-}
-
-fn write_cache(board_dir: &Path, actor: &str, cache: &ClaimCache) {
-    let path = cache_path(board_dir, actor);
-    if cache.claims.is_empty() {
-        let _ = std::fs::remove_file(&path);
-        return;
-    }
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = write_json(&path, cache);
 }
 
 /// Legacy Unix launch paths delegate all behavior and error handling to the native command.
