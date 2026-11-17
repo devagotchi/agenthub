@@ -143,15 +143,19 @@ fn text(report: &Report<'_>, import: bool) -> String {
     } else {
         ""
     };
+    let files = match report.files {
+        1 => "1 file".to_string(),
+        n => format!("{n} files"),
+    };
     lines.push(if import {
         format!(
-            "{} found in {} files{more}: {} imported, {} already on the board.",
-            report.found, report.files, report.imported, report.on_board
+            "{} found in {files}{more}: {} imported, {} already on the board.",
+            report.found, report.imported, report.on_board
         )
     } else {
         format!(
-            "{} found in {} files{more}: {} new, {} already on the board. `board scan --import` adds the new ones.",
-            report.found, report.files, report.new, report.on_board
+            "{} found in {files}{more}: {} new, {} already on the board. `board scan --import` adds the new ones.",
+            report.found, report.new, report.on_board
         )
     });
     lines.join("\n")

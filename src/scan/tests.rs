@@ -52,6 +52,10 @@ fn the_library_finds_what_kiro_spec_kit_cursor_claude_plans_and_code_leave() {
     write(root, "node_modules/pkg/TODO.md", "- [ ] theirs\n");
     write(root, "target/x.rs", "// TODO: built\n");
     write(root, ".idea/notes.md", "- [ ] editor\n");
+    // Never read: templates and changelogs.
+    write(root, "docs/TEMPLATE.md", "- [ ] Define scope\n");
+    write(root, "CHANGELOG.md", "- [ ] old\n");
+    write(root, ".kiro/TEMPLATE.md", "- [ ] a hidden template\n");
 
     let found = scan(root, root, &library());
     let got: Vec<_> = found

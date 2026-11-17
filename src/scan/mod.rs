@@ -22,6 +22,7 @@ mod tests;
 
 /// The rule library, most specific first: the first rule that matches a file reads it.
 pub const LIBRARY: &[(&str, &str)] = &[
+    ("skip", include_str!("rules/skip.json")),
     ("kiro", include_str!("rules/kiro.json")),
     ("spec-kit", include_str!("rules/spec-kit.json")),
     ("cursor", include_str!("rules/cursor.json")),
@@ -104,6 +105,8 @@ pub enum Kind {
     Markdown,
     /// A comment that starts with a marker and a colon: `// TODO: text`, `# FIXME(ann): text`.
     Marker,
+    /// Never read: templates and changelogs, whose open items are no one's work.
+    Skip,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -175,7 +178,7 @@ pub fn check(rule: &Rule) -> Result<(), &'static str> {
     }
     match (rule.kind, &rule.table) {
         (Kind::Marker, _) if rule.markers.is_empty() => Err("a marker rule names its markers"),
-        (Kind::Marker, Some(_)) => Err("a table is read by a markdown rule"),
+        (Kind::Marker | Kind::Skip, Some(_)) => Err("a table is read by a markdown rule"),
         (_, Some(t)) if t.status.is_empty() || t.open.is_empty() || t.title.is_empty() => {
             Err("a table names its status, open and title")
         }
@@ -196,6 +199,9 @@ pub fn scan(project: &Path, start: &Path, rules: &[Rule]) -> Scan {
         let Some(rule) = rules.iter().find(|rule| applies(rule, &rel, &name)) else {
             continue;
         };
+        if rule.kind == Kind::Skip {
+            continue;
+        }
         if !std::fs::metadata(&path).is_ok_and(|m| m.len() <= MAX_FILE_BYTES) {
             continue;
         }
@@ -301,15 +307,18 @@ fn walk_into(name: &str, rel: &str, rules: &[Rule]) -> bool {
         return true;
     }
     let dir = format!("{rel}/");
+    // Only a rule that reads opens a hidden folder.
     rules
         .iter()
+        .filter(|rule| rule.kind != Kind::Skip)
         .flat_map(|rule| &rule.under)
         .any(|under| under.starts_with(&dir) || dir.starts_with(under.as_str()))
 }
 
 fn applies(rule: &Rule, rel: &str, name: &str) -> bool {
+    // A skip rule with no folders skips its files anywhere, hidden folders too.
     let placed = if rule.under.is_empty() {
-        !hidden(rel)
+        rule.kind == Kind::Skip || !hidden(rel)
     } else {
         rule.under
             .iter()
@@ -327,6 +336,7 @@ fn applies(rule: &Rule, rel: &str, name: &str) -> bool {
 fn read(rule: &Rule, text: &str) -> Vec<Item> {
     match rule.kind {
         Kind::Markdown => markdown::read(text, rule.table.as_ref()),
+        Kind::Skip => Vec::new(),
         Kind::Marker => text
             .lines()
             .enumerate()
