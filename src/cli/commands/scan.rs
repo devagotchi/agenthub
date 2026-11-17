@@ -2,14 +2,12 @@
 //! the ticket it already is when one carries its fingerprint; `--import` adds the rest. The
 //! same on a local board and on a hub's board, since both go through the face.
 
-use std::path::Path;
-
 use serde::Serialize;
 
-use super::{CommandResult, EXIT_OK, Output, Parsed, no_id, usage_error};
+use super::Command;
+use crate::cli::{CommandResult, EXIT_OK, no_id, usage_error};
 use crate::{
-    Actor, Anchors, Filter, NewTicket,
-    face::Face,
+    Anchors, Filter, NewTicket,
     scan::{self, Finding},
 };
 
@@ -36,13 +34,15 @@ struct Report<'a> {
     items: Vec<Item<'a>>,
 }
 
-pub(super) fn run(
-    parsed: &Parsed,
-    board: &dyn Face,
-    actor: &Actor<'_>,
-    board_dir: &Path,
-    output: &mut Output<'_>,
-) -> CommandResult {
+pub(super) fn scan(c: Command<'_, '_>) -> CommandResult {
+    let Command {
+        parsed,
+        board,
+        actor,
+        board_dir,
+        output,
+        ..
+    } = c;
     let project = board_dir
         .parent()
         .ok_or_else(|| usage_error("the board has no project folder"))?;
