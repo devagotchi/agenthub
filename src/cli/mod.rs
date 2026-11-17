@@ -40,6 +40,7 @@ mod hub;
 mod init;
 mod output;
 mod remote;
+mod scan;
 #[cfg(test)]
 mod tests;
 
@@ -546,6 +547,7 @@ fn dispatch(
             });
             Ok(EXIT_OK)
         }
+        "scan" => scan::run(parsed, board, actor, board_dir, output),
         "new" => {
             let title = need(0, "TITLE")?.to_string();
             let ticket = no_id(board.create(
