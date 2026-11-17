@@ -1,0 +1,47 @@
+[
+  {
+    "name": "plan-files",
+    "label": "plan",
+    "names": [
+      "PLAN.md",
+      "PLANS.md",
+      "TODO.md",
+      "TODOS.md",
+      "TASKS.md",
+      "ROADMAP.md",
+      "todo.md",
+      "tasks.md"
+    ],
+    "kind": "markdown",
+    "table": {
+      "status": [
+        "status",
+        "state"
+      ],
+      "open": [
+        "not started",
+        "todo",
+        "to do",
+        "open",
+        "in progress",
+        "pending",
+        "planned",
+        "blocked",
+        "absent",
+        "partial"
+      ],
+      "title": [
+        "task",
+        "tasks",
+        "feature",
+        "title",
+        "item"
+      ],
+      "id": [
+        "#",
+        "id",
+        "milestone"
+      ]
+    }
+  }
+]

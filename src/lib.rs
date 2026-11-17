@@ -22,6 +22,7 @@ mod lease;
 mod local;
 pub mod migrations;
 mod project;
+pub mod scan;
 mod settings;
 mod ticket;
 pub mod wake;

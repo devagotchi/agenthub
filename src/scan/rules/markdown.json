@@ -1,0 +1,42 @@
+[
+  {
+    "name": "markdown-checklists",
+    "label": "checklist",
+    "ext": [
+      "md",
+      "mdx",
+      "markdown"
+    ],
+    "kind": "markdown",
+    "table": {
+      "status": [
+        "status",
+        "state"
+      ],
+      "open": [
+        "not started",
+        "todo",
+        "to do",
+        "open",
+        "in progress",
+        "pending",
+        "planned",
+        "blocked",
+        "absent",
+        "partial"
+      ],
+      "title": [
+        "task",
+        "tasks",
+        "feature",
+        "title",
+        "item"
+      ],
+      "id": [
+        "#",
+        "id",
+        "milestone"
+      ]
+    }
+  }
+]

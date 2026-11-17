@@ -11,6 +11,7 @@ use super::{ClaimCache, CommandResult, Output, Parsed, usage_error};
 
 mod leases;
 mod reads;
+mod scan;
 mod tickets;
 mod upkeep;
 
@@ -55,6 +56,7 @@ pub(super) fn dispatch(
         "hooks" => upkeep::hooks(c),
         "ls" => reads::ls(c),
         "show" => reads::show(c),
+        "scan" => scan::scan(c),
         "new" => tickets::new(c),
         "claim" => leases::claim(c),
         "beat" if parsed.positional.first().is_none() => leases::beat_all(c),
