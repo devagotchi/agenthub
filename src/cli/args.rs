@@ -17,7 +17,7 @@ pub const USAGE: &str = "Usage: devagotchi board <command> [options]
   show      ID
   new       TITLE [--desc D] [--priority N] [--label L]... [--parent ID] [--assign ID] [--found-in ID] [--epic] [ANCHORS]
             [--origin JSON]        imported from {path,item[,revision][,content_sha256]}: once per board; a repeat returns the ticket, changed inputs conflict
-  claim    [ID] [--ttl SECONDS] [--label L] [--state S]   no ID: the best ready ticket
+  claim     [ID] [--ttl SECONDS] [--label L] [--state S]   no ID: the best ready ticket
   beat      [ID] [--progress JSON] [--fence N]   no ID: every ticket you hold (what the hook pack calls)
   held                             the tickets you hold (empty output when none)
   note      ID TEXT [--kind K] [--to ID] [--fence N]

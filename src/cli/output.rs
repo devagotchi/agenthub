@@ -110,6 +110,27 @@ pub(super) fn trim(text: &str, max: usize) -> String {
     }
 }
 
+/// A board time (ms since the epoch) as UTC to the second, `2026-11-18T17:05:09Z`: the
+/// proleptic Gregorian calendar from day numbers (H. Hinnant's `civil_from_days`).
+pub(super) fn utc(ms: i64) -> String {
+    let secs = ms.div_euclid(1000);
+    let (days, second) = (secs.div_euclid(86_400), secs.rem_euclid(86_400));
+    let z = days + 719_468;
+    let (era, doe) = (z.div_euclid(146_097), z.rem_euclid(146_097));
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        second / 3600,
+        second % 3600 / 60,
+        second % 60
+    )
+}
+
 pub(super) fn write_json(path: &Path, value: &impl Serialize) -> BridgeResult<()> {
     let text = serde_json::to_string_pretty(value)
         .map_err(|e| BridgeError::new("board_io", e.to_string()))?;

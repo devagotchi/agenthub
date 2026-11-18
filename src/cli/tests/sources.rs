@@ -71,6 +71,11 @@ async fn an_imported_ticket_is_made_once_and_worked_through_its_lanes() {
             text.contains("origin docs/ROADMAP.md#scanner-preview · revision commit:0123"),
             "{text}"
         );
+        let at = shown["provenance"]["recorded_at"].as_i64().unwrap();
+        assert!(
+            text.contains(&format!("recorded by importer at {}", cli::utc(at))),
+            "{text}"
+        );
         let out = root.join("board.jsonl");
         ok(None, &["export", "--out", out.to_str().unwrap()]);
         let exported = std::fs::read_to_string(&out).unwrap();
@@ -84,4 +89,18 @@ async fn an_imported_ticket_is_made_once_and_worked_through_its_lanes() {
         assert_eq!(ok(None, &["ls"]).as_array().map(Vec::len), Some(1));
     })
     .await;
+}
+
+/// `board show` prints a board time as UTC, leap days and times before 1970 included.
+#[test]
+fn board_times_print_as_utc() {
+    for (ms, text) in [
+        (0, "1970-01-01T00:00:00Z"),
+        (-1, "1969-12-31T23:59:59Z"),
+        (951_782_400_000, "2000-02-29T00:00:00Z"),
+        (1_795_021_509_000, "2026-11-18T17:05:09Z"),
+        (4_107_628_799_000, "2100-03-01T23:59:59Z"),
+    ] {
+        assert_eq!(cli::utc(ms), text, "{ms}");
+    }
 }

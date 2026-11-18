@@ -199,7 +199,6 @@ pub struct TicketView {
     pub notes: Vec<Note>,
     /// Where the ticket was imported from, as recorded when it was made; absent when it was
     /// made without a source.
-    #[serde(default)]
     pub provenance: Option<TicketProvenance>,
 }
 

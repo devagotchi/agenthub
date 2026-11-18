@@ -272,6 +272,31 @@ async fn a_normalized_repeat_survives_changed_board_defaults() {
     equivalent.anchors.machine = Some("another-machine".into());
     equivalent.anchors.session = Some("another-session".into());
     equivalent.anchors.agent = Some("another-seat".into());
+    equivalent.anchors.repo = Some("https://github.com/x/y".into());
     assert_eq!(f.board.create(&scanner, equivalent).unwrap(), original);
     assert_eq!(f.board.verify_chain().unwrap(), head);
+}
+
+/// The digest's bytes are pinned: sorted keys, compact, whatever serde_json features a build
+/// turns on. A stored `request_sha256` must keep matching its repeat.
+#[test]
+fn the_request_digest_hashes_a_fixed_form() {
+    let mut new = imported();
+    new.priority = Some(2);
+    let labels = ["roadmap".to_string()];
+    let digest = crate::provenance::request_digest(&new, "T", "task", &labels, None, Some("f"));
+    let form = concat!(
+        r#"{"assignee":null,"description":"Preview discovered roadmap items before admission","#,
+        r#""discovered_from":null,"environment":null,"fingerprint":"f","kind":"task","#,
+        r#""labels":["roadmap"],"parent":null,"priority":2,"source":{"content_sha256":""#,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        r#"","item":"scanner-preview","path":"docs/ROADMAP.md","#,
+        r#""revision":"commit:0123456789abcdef"},"title":"T","version":1}"#,
+    );
+    use sha2::Digest;
+    assert_eq!(digest, hex::encode(sha2::Sha256::digest(form.as_bytes())));
+    new.source.as_mut().unwrap().content_sha256 = None;
+    let bare = crate::provenance::request_digest(&new, "T", "task", &labels, None, Some("f"));
+    let form = form.replace(&format!(r#""content_sha256":"{}","#, "a".repeat(64)), "");
+    assert_eq!(bare, hex::encode(sha2::Sha256::digest(form.as_bytes())));
 }

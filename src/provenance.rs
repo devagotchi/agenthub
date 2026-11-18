@@ -83,10 +83,15 @@ pub struct TicketProvenance {
 
 /// The normalized creation inputs of `new`, as a digest. Normalized: the title trimmed, the
 /// kind's default spelled out, the labels cleaned; a priority left out stays left out, so a
-/// change of the board's default never turns a retry into a conflict. The anchors the hub
-/// fills from the connection or the board's settings when a caller leaves them out (machine,
-/// repo, agent, session) are where a ticket was made from, not what was asked for, and the
-/// sightings (`occurrences`, `last_seen_at`) change between scans: none of them count.
+/// change of the board's default never turns a retry into a conflict. The machine, repo,
+/// agent and session anchors never count, whether the caller gave them or the hub filled them
+/// from the connection or the board's settings: they say where a ticket was made from, not
+/// what was asked for. The sightings (`occurrences`, `last_seen_at`) change between scans and
+/// do not count either.
+///
+/// The bytes hashed are compact JSON with the keys in the order the structs below declare them
+/// (sorted, as in format version 1): serialized straight from the structs, never through a
+/// `serde_json::Value`, whose key order depends on serde_json's `preserve_order` feature.
 pub(crate) fn request_digest(
     new: &NewTicket,
     title: &str,
@@ -95,19 +100,53 @@ pub(crate) fn request_digest(
     environment: Option<&str>,
     fingerprint: Option<&str>,
 ) -> String {
-    let inputs = serde_json::json!({
-        "version": 1,
-        "title": title,
-        "description": new.description,
-        "kind": kind,
-        "priority": new.priority,
-        "labels": labels,
-        "parent": new.parent,
-        "assignee": new.assignee,
-        "discovered_from": new.discovered_from,
-        "environment": environment,
-        "fingerprint": fingerprint,
-        "source": new.source,
-    });
-    hex::encode(Sha256::digest(inputs.to_string().as_bytes()))
+    let inputs = Inputs {
+        assignee: new.assignee.as_deref(),
+        description: &new.description,
+        discovered_from: new.discovered_from.as_deref(),
+        environment,
+        fingerprint,
+        kind,
+        labels,
+        parent: new.parent.as_deref(),
+        priority: new.priority,
+        source: new.source.as_ref().map(|s| Origin {
+            content_sha256: s.content_sha256.as_deref(),
+            item: &s.item,
+            path: &s.path,
+            revision: s.revision.as_deref(),
+        }),
+        title,
+        version: 1,
+    };
+    let bytes = serde_json::to_vec(&inputs).expect("plain fields serialize");
+    hex::encode(Sha256::digest(&bytes))
+}
+
+/// Format version 1 of the digested inputs; keep the fields sorted by name.
+#[derive(Serialize)]
+struct Inputs<'a> {
+    assignee: Option<&'a str>,
+    description: &'a str,
+    discovered_from: Option<&'a str>,
+    environment: Option<&'a str>,
+    fingerprint: Option<&'a str>,
+    kind: &'a str,
+    labels: &'a [String],
+    parent: Option<&'a str>,
+    priority: Option<i64>,
+    source: Option<Origin<'a>>,
+    title: &'a str,
+    version: u32,
+}
+
+/// The origin inside [`Inputs`]: sorted by name, the evidence left out when not given.
+#[derive(Serialize)]
+struct Origin<'a> {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content_sha256: Option<&'a str>,
+    item: &'a str,
+    path: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    revision: Option<&'a str>,
 }
