@@ -132,6 +132,7 @@ impl Face for Remote {
                 "agent": new.anchors.agent,
                 "session": new.anchors.session,
                 "fingerprint": new.anchors.fingerprint,
+                "origin": new.source,
             }),
         )
     }

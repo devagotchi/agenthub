@@ -21,6 +21,7 @@ pub mod issue_lifecycle;
 mod lease;
 pub mod migrations;
 mod project;
+mod provenance;
 pub mod scan;
 mod settings;
 mod ticket;
@@ -35,6 +36,7 @@ pub use checks::{fail, valid_name};
 pub use clock::{Clock, system_clock, utc};
 pub use lease::{Lease, NextFilter};
 pub use project::*;
+pub use provenance::{TicketProvenance, TicketSource};
 pub use settings::{ProjectSettings, Settings};
 pub use ticket::{
     Actor, ChainStatus, Dep, DepKind, Event, Filter, NewTicket, Note, Patch, Ticket, TicketView,

@@ -28,7 +28,7 @@ async fn on_its_own_every_table_is_a_board_table_with_its_own_history() {
             .fetch_all(&mut *connection)
             .await
             .unwrap();
-    assert_eq!(versions, vec![1]);
+    assert_eq!(versions, vec![1, 2]);
 }
 
 /// Opened again, nothing changes: every statement finds what it would make.
@@ -39,10 +39,10 @@ async fn run_again_the_migrations_find_everything_made() {
     let mut connection = <sqlx::AnyConnection as sqlx::Connection>::connect(&test.url)
         .await
         .unwrap();
-    sqlx::raw_sql(sqlx::AssertSqlSafe(
-        MIGRATIONS.iter().next().unwrap().sql.as_ref().to_string(),
-    ))
-    .execute(&mut connection)
-    .await
-    .unwrap();
+    for migration in MIGRATIONS.iter() {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(migration.sql.as_ref().to_string()))
+            .execute(&mut connection)
+            .await
+            .unwrap_or_else(|error| panic!("migration {}: {error}", migration.version));
+    }
 }

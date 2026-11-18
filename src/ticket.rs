@@ -3,7 +3,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{AnchorPatch, Anchors};
+use crate::{AnchorPatch, Anchors, TicketProvenance, TicketSource};
 
 /// Who is acting. Identity comes from the hub's authentication, never from a tool
 /// argument; `human` gates force-release; `wip_limit` overrides the board default.
@@ -197,6 +197,10 @@ pub struct TicketView {
     pub dependents: Vec<Dep>,
     pub children: Vec<String>,
     pub notes: Vec<Note>,
+    /// Where the ticket was imported from, as recorded when it was made; absent when it was
+    /// made without a source.
+    #[serde(default)]
+    pub provenance: Option<TicketProvenance>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -223,6 +227,9 @@ pub struct NewTicket {
     /// Defaults to 1.
     pub occurrences: Option<i64>,
     pub last_seen_at: Option<i64>,
+    /// The document item this ticket is imported from: once per board, a repeat with the
+    /// same inputs returns the ticket, changed inputs are `source_conflict`.
+    pub source: Option<TicketSource>,
 }
 
 pub(crate) fn one() -> i64 {

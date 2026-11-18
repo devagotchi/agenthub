@@ -15,6 +15,7 @@ mod approvals;
 mod inbox;
 mod issues;
 mod operations;
+mod tickets;
 
 #[derive(Clone)]
 pub struct HostedBoard {
@@ -413,96 +414,6 @@ impl HostedBoard {
             }
             Ok(events)
         })
-    }
-
-    pub async fn create(&self, actor: &Actor<'_>, new: &NewTicket) -> BridgeResult<Ticket> {
-        transaction!(&self.store, |connection| {
-            let now = self.scope(connection).await?;
-            self.create_in(connection, actor, new, now).await
-        })
-    }
-
-    async fn create_in(
-        &self,
-        connection: &mut AnyConnection,
-        actor: &Actor<'_>,
-        new: &NewTicket,
-        now: i64,
-    ) -> DbResult<Ticket> {
-        let title = new.title.trim();
-        if title.is_empty() || title.chars().count() > 300 {
-            return Err(invalid("title must be 1 to 300 characters").into());
-        }
-        let kind = new.kind.as_deref().unwrap_or("task");
-        if !matches!(kind, "task" | "epic" | "message") {
-            return Err(invalid("kind must be task, epic or message").into());
-        }
-        let occurrences = new.occurrences.unwrap_or(1);
-        if occurrences < 1 {
-            return Err(invalid("occurrences must be at least 1").into());
-        }
-        let workflow: Workflow = self.configuration(connection, "workflow").await?;
-        let settings: Settings = self.configuration(connection, "settings").await?;
-        let environment = clean_anchor(&new.anchors.environment);
-        check_environment(&settings, environment.as_deref())?;
-        let id = if let Some(parent) = &new.parent {
-            let parent_ticket = self.ticket(connection, parent, &workflow, now).await?;
-            if workflow.is_done(&parent_ticket.state) {
-                return Err(fail("parent_closed", format!("{parent} is closed")).into());
-            }
-            let next: i64 = sqlx::query_scalar(
-                "UPDATE board_tickets SET child_seq=child_seq+1
-                     WHERE tenant_id=$1 AND board_id=$2 AND id=$3 RETURNING child_seq",
-            )
-            .bind(&self.tenant)
-            .bind(&self.project)
-            .bind(parent)
-            .fetch_one(&mut *connection)
-            .await?;
-            format!("{parent}.{next}")
-        } else {
-            self.fresh_id(connection).await?
-        };
-        if let Some(from) = &new.discovered_from {
-            self.ticket(connection, from, &workflow, now).await?;
-        }
-        sqlx::query(
-                "INSERT INTO board_tickets
-                 (tenant_id,board_id,id,kind,title,description,state,priority,labels,parent,assignee,
-                  created_by,created_at,updated_at,machine,repo,environment,agent,session,fingerprint,occurrences,last_seen_at)
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13,$14,$15,$16,$17,$18,$19,$20,$21)",
-            ).bind(&self.tenant).bind(&self.project).bind(&id).bind(kind).bind(title)
-                .bind(&new.description).bind(&workflow.initial_state)
-                .bind(new.priority.unwrap_or(settings.default_priority))
-                .bind(serde_json::to_string(&clean_labels(&new.labels)).expect("labels json"))
-                .bind(&new.parent).bind(&new.assignee).bind(actor.id).bind(now)
-                .bind(clean_anchor(&new.anchors.machine)).bind(clean_anchor(&new.anchors.repo))
-                .bind(environment).bind(clean_anchor(&new.anchors.agent))
-                .bind(clean_anchor(&new.anchors.session)).bind(clean_anchor(&new.anchors.fingerprint))
-                .bind(occurrences).bind(new.last_seen_at).execute(&mut *connection).await?;
-        for (target, kind) in [
-            (&new.parent, "parent"),
-            (&new.discovered_from, "discovered-from"),
-        ] {
-            if let Some(target) = target {
-                sqlx::query(
-                        "INSERT INTO board_deps (tenant_id,board_id,ticket,depends_on,kind,created_by,created_at)
-                         VALUES ($1,$2,$3,$4,$5,$6,$7)",
-                    ).bind(&self.tenant).bind(&self.project).bind(&id).bind(target).bind(kind)
-                        .bind(actor.id).bind(now).execute(&mut *connection).await?;
-            }
-        }
-        self.event(
-            connection,
-            actor.id,
-            now,
-            "ticket.created",
-            Some(&id),
-            None,
-            serde_json::json!({"title":title,"state":workflow.initial_state,"parent":new.parent}),
-        )
-        .await?;
-        self.ticket(connection, &id, &workflow, now).await
     }
 
     async fn clear_lease(
