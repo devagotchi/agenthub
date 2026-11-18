@@ -15,6 +15,10 @@ pub(super) fn new(c: Command<'_, '_>) -> CommandResult {
         ..
     } = c;
     let title = need(parsed, 0, "TITLE")?.to_string();
+    let source = parsed
+        .flag("--origin")
+        .map(|json| serde_json::from_str(json).map_err(|e| usage_error(format!("--origin: {e}"))))
+        .transpose()?;
     let ticket = no_id(board.create(
         actor,
         NewTicket {
@@ -27,6 +31,7 @@ pub(super) fn new(c: Command<'_, '_>) -> CommandResult {
             assignee: parsed.flag("--assign").map(str::to_string),
             discovered_from: parsed.flag("--found-in").map(str::to_string),
             anchors: parsed.anchors(),
+            source,
             ..NewTicket::default()
         },
     ))?;

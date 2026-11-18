@@ -102,6 +102,7 @@ mod hosted_lifecycle;
 mod inbox;
 mod lanes;
 mod schema;
+mod sources;
 mod standalone;
 mod standing;
 mod updates;

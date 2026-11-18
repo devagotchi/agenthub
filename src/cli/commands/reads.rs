@@ -1,6 +1,8 @@
 //! Commands that read the board: prime, ready, held, ls and show.
 
-use crate::cli::{CommandResult, EXIT_OK, PROTOCOL_LINE, anchored, no_id, table, trim, with_id};
+use crate::cli::{
+    CommandResult, EXIT_OK, PROTOCOL_LINE, anchored, no_id, table, trim, utc, with_id,
+};
 use crate::{Filter, face::ME};
 
 use super::{Command, need};
@@ -197,6 +199,18 @@ pub(super) fn show(c: Command<'_, '_>) -> CommandResult {
         ];
         if let Some(anchors) = t.anchor_line() {
             lines.push(format!("  {anchors}"));
+        }
+        if let Some(p) = &view.provenance {
+            let s = &p.source;
+            lines.push(format!(
+                "  origin {}#{} · revision {} · sha256 {} · recorded by {} at {}",
+                s.path,
+                s.item,
+                s.revision.as_deref().unwrap_or("-"),
+                s.content_sha256.as_deref().unwrap_or("-"),
+                p.recorded_by,
+                utc(p.recorded_at)
+            ));
         }
         if !t.blocked_by.is_empty() {
             lines.push(format!("  blocked by {}", t.blocked_by.join(", ")));

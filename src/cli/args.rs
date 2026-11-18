@@ -16,6 +16,7 @@ pub const USAGE: &str = "Usage: devagotchi board <command> [options]
   ls        [--state S] [--label L] [--text T] [--open] [--limit N] [ANCHORS]
   show      ID
   new       TITLE [--desc D] [--priority N] [--label L]... [--parent ID] [--assign ID] [--found-in ID] [--epic] [ANCHORS]
+            [--origin JSON]        imported from {path,item[,revision][,content_sha256]}: once per board; a repeat returns the ticket, changed inputs conflict
   claim     [ID] [--ttl SECONDS] [--label L] [--state S]   no ID: the best ready ticket
   beat      [ID] [--progress JSON] [--fence N]   no ID: every ticket you hold (what the hook pack calls)
   held                             the tickets you hold (empty output when none)
@@ -41,7 +42,7 @@ Global: --dir PATH (project directory; default: walk up from here)  --as ID (act
         --json (also on when stdout is not a terminal)  --text (force the human form)  --quiet
 Standalone board: in the Postgres DEVAGOTCHI_BOARD_STORAGE_URL names, else the project's (init --storage URL, no password in it).
 Bound project: every command above runs on the hub as the signed-in account; --as / DEVAGOTCHI_ACTOR is your seat there.
-Exit codes: 0 ok · 2 conflict (fence, version, held, blocked, WIP) · 3 refused · 4 not found · 5 board unavailable · 64 usage";
+Exit codes: 0 ok · 2 conflict (fence, version, held, blocked, WIP, source) · 3 refused · 4 not found · 5 board unavailable · 64 usage";
 
 pub(super) struct Parsed {
     pub(super) command: String,
@@ -66,6 +67,7 @@ pub(super) const VALUE_FLAGS: &[&str] = &[
     "--parent",
     "--assign",
     "--found-in",
+    "--origin",
     "--ttl",
     "--progress",
     "--fence",

@@ -351,7 +351,7 @@ impl HostedBoard {
         })
     }
 
-    async fn deps(
+    pub(super) async fn deps(
         &self,
         connection: &mut AnyConnection,
         id: &str,
@@ -379,33 +379,6 @@ impl HostedBoard {
             });
         }
         Ok(deps)
-    }
-
-    pub async fn view(&self, id: &str) -> BridgeResult<crate::TicketView> {
-        transaction!(&self.store, |connection| {
-            let now = self.scope(connection).await?;
-            let workflow = self.configuration(connection, "workflow").await?;
-            let ticket = self.ticket(connection, id, &workflow, now).await?;
-            let deps = self.deps(connection, id, false).await?;
-            let dependents = self.deps(connection, id, true).await?;
-            let children=sqlx::query_scalar(
-                "SELECT id FROM board_tickets WHERE tenant_id=$1 AND board_id=$2 AND parent=$3 ORDER BY created_at,id COLLATE \"C\"",
-            ).bind(&self.tenant).bind(&self.project).bind(id).fetch_all(&mut *connection).await?;
-            let texts:Vec<String>=sqlx::query_scalar(
-                "SELECT row_to_json(n)::text FROM board_notes n WHERE tenant_id=$1 AND board_id=$2 AND ticket=$3 ORDER BY seq",
-            ).bind(&self.tenant).bind(&self.project).bind(id).fetch_all(&mut *connection).await?;
-            let notes = texts
-                .iter()
-                .map(|text| decode(text))
-                .collect::<BridgeResult<Vec<Note>>>()?;
-            Ok(crate::TicketView {
-                ticket,
-                deps,
-                dependents,
-                children,
-                notes,
-            })
-        })
     }
 
     pub async fn add_dep(

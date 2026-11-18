@@ -18,9 +18,8 @@ pub const EXIT_USAGE: u8 = 64;
 pub(super) fn exit_code_for(code: &str) -> u8 {
     match code {
         "stale_fence" | "version_conflict" | "held_by_other" | "lease_expired" | "not_holder"
-        | "wip_limit" | "blocked" | "distinct_required" | "dependency_cycle" | "not_held" => {
-            EXIT_CONFLICT
-        }
+        | "wip_limit" | "blocked" | "distinct_required" | "dependency_cycle" | "not_held"
+        | "source_conflict" => EXIT_CONFLICT,
         "not_found" => EXIT_NOT_FOUND,
         "board_store" | "board_random" | "board_id" | "no_board" | "no_storage"
         | "board_runtime" | "board_io" | "hub_unreachable" | "hub_error" => EXIT_UNAVAILABLE,
@@ -49,6 +48,9 @@ pub(super) fn next_for(code: &str, id: Option<&str>) -> String {
             format!("board show {id} --json and retry set with the current version")
         }
         "wip_limit" => "board done / handoff / release one of the tickets you hold first".into(),
+        "source_conflict" => {
+            "board show the ticket the message names and reconcile it with board set; never change the origin's path or item to get past it".into()
+        }
         "blocked" => format!("board show {id} — finish or hand off the blockers it lists"),
         "distinct_required" => "someone else must take this lane; leave it for them".into(),
         "not_claimable" => format!(

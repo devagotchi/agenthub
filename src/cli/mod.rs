@@ -57,7 +57,7 @@ use errors::{
     CommandResult, ErrorBody, ErrorOut, exit_code_for, next_for, no_id, usage_error, with_id,
 };
 use init::{LOCAL_GITIGNORE, init};
-use output::{Output, anchored, table, trim, write_json};
+use output::{Output, anchored, table, trim, utc, write_json};
 
 /// Everything the command line needs from its environment, so tests can supply it.
 pub struct Invocation {
