@@ -12,11 +12,10 @@
 use std::collections::BTreeMap;
 
 use devagotchi_contracts::BridgeResult;
-use rusqlite::{OptionalExtension, params};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Actor, Board, Note, invalid, note_from_row, store_error};
+use super::{Actor, Board, Note, invalid};
 
 /// New notes one delivery carries at most; the rest come with the next.
 pub const MAX_NOTES: usize = 5;
@@ -228,93 +227,26 @@ fn check_who(who: &[String]) -> BridgeResult<()> {
 }
 
 impl Board {
-    fn local_cursors(connection: &rusqlite::Connection) -> BridgeResult<Cursors> {
-        let raw: Option<String> = connection
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                params![KEY],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(store_error)?;
-        Ok(raw
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default())
-    }
-
-    fn local_addressed(connection: &rusqlite::Connection, after: i64) -> BridgeResult<Vec<Note>> {
-        let mut statement = connection
-            .prepare(
-                "SELECT seq, ticket, author, kind, body, to_principal, fence, created_at
-                 FROM notes WHERE seq > ?1 AND to_principal IS NOT NULL ORDER BY seq LIMIT ?2",
-            )
-            .map_err(store_error)?;
-        let rows = statement
-            .query_map(params![after, SCAN], note_from_row)
-            .map_err(store_error)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(store_error)
-    }
-
-    fn local_save(tx: &rusqlite::Transaction<'_>, cursors: &Cursors) -> BridgeResult<()> {
-        tx.execute(
-            "INSERT INTO settings (key, value) VALUES (?1, ?2)
-             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-            params![KEY, serde_json::to_string(cursors).expect("inbox json")],
-        )
-        .map_err(store_error)?;
-        Ok(())
-    }
-
     /// What `who` should hear now. With `commit`, they are counted as told; without, only
     /// `inbox_mark_delivered` moves them (a webhook marks a delivery once it was taken).
     pub fn inbox_deliver(
         &self,
-        actor: &Actor<'_>,
+        _actor: &Actor<'_>,
         who: &[String],
         me: &str,
         commit: bool,
     ) -> BridgeResult<Delivery> {
         check_who(who)?;
-        if let Some(hosted) = &self.hosted {
-            return self.hosted_call(hosted.inbox_deliver(who, me, commit), false);
-        }
-        let now = self.now();
-        {
-            // Nothing addressed to them since they last marked read: no write at all.
-            let connection = self.local()?;
-            let cursors = Self::local_cursors(&connection)?;
-            let notes = Self::local_addressed(&connection, floor(&cursors, who))?;
-            if wanted(&notes, who, me).next().is_none() {
-                return Ok(Delivery::default());
-            }
-            if !commit {
-                let mut trial = cursors;
-                return Ok(plan(&notes, who, me, &mut trial, now));
-            }
-        }
-        self.write(actor, |w| {
-            let mut cursors = Self::local_cursors(w.tx)?;
-            let notes = Self::local_addressed(w.tx, floor(&cursors, who))?;
-            let before = cursors.clone();
-            let delivery = plan(&notes, who, me, &mut cursors, now);
-            if cursors != before {
-                Self::local_save(w.tx, &cursors)?;
-            }
-            Ok(delivery)
-        })
+        self.hosted_call(self.hosted.inbox_deliver(who, me, commit))
     }
 
     /// `notes` were taken: they are not sent again.
-    pub fn inbox_mark_delivered(&self, actor: &Actor<'_>, notes: &[InboxNote]) -> BridgeResult<()> {
-        if let Some(hosted) = &self.hosted {
-            return self.hosted_call(hosted.inbox_mark_delivered(notes), false);
-        }
-        let now = self.now();
-        self.write(actor, |w| {
-            let mut cursors = Self::local_cursors(w.tx)?;
-            mark_delivered(&mut cursors, notes, now);
-            Self::local_save(w.tx, &cursors)
-        })
+    pub fn inbox_mark_delivered(
+        &self,
+        _actor: &Actor<'_>,
+        notes: &[InboxNote],
+    ) -> BridgeResult<()> {
+        self.hosted_call(self.hosted.inbox_mark_delivered(notes))
     }
 
     /// Everything addressed to `who` not yet marked read, after marking through `ack_through`.
@@ -325,18 +257,7 @@ impl Board {
         ack_through: Option<i64>,
     ) -> BridgeResult<Vec<InboxNote>> {
         check_who(who)?;
-        if let Some(hosted) = &self.hosted {
-            return self.hosted_call(hosted.inbox(who, actor.id, ack_through), false);
-        }
-        self.write(actor, |w| {
-            let mut cursors = Self::local_cursors(w.tx)?;
-            if let Some(through) = ack_through {
-                acknowledge(&mut cursors, who, through);
-                Self::local_save(w.tx, &cursors)?;
-            }
-            let notes = Self::local_addressed(w.tx, floor(&cursors, who))?;
-            Ok(unread(&notes, who, actor.id, &cursors))
-        })
+        self.hosted_call(self.hosted.inbox(who, actor.id, ack_through))
     }
 }
 

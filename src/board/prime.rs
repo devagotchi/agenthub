@@ -4,7 +4,7 @@ use devagotchi_contracts::BridgeResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{Actor, Board, Filter, PROTOCOL_LINE, Ticket, list_tickets, load_workflow};
+use crate::{Actor, Board, Filter, PROTOCOL_LINE, Ticket};
 
 /// What an agent needs at the start of a session, in one read: what it holds (with
 /// the fences), what it could claim, what needs a person, and notes addressed to it.
@@ -56,17 +56,7 @@ pub struct NoteToMe {
 impl Board {
     /// What `actor` could claim right now, best first: assigned to them, then priority, then age.
     pub fn ready(&self, actor: &Actor<'_>, limit: usize) -> BridgeResult<Vec<Ticket>> {
-        if let Some(hosted) = &self.hosted {
-            return self.hosted_call(hosted.ready(actor, limit), false);
-        }
-        let connection = self.local()?;
-        let workflow = load_workflow(&connection)?;
-        let filter = Filter {
-            ready: true,
-            limit: Some(limit),
-            ..Filter::default()
-        };
-        list_tickets(&connection, &workflow, &filter, self.now(), Some(actor.id))
+        self.hosted_call(self.hosted.ready(actor, limit))
     }
 
     /// The session-start read. `limit` caps the ready list; held tickets are never cut.
@@ -98,10 +88,7 @@ impl Board {
                 }
             }
         }
-        let now = match &self.hosted {
-            Some(hosted) => self.hosted_call(hosted.database_now(), false)?,
-            None => self.now(),
-        };
+        let now = self.hosted_call(self.hosted.database_now())?;
         let settings = self.settings()?;
         let summary = |t: &Ticket| Ready {
             id: t.id.clone(),

@@ -8,10 +8,11 @@
 //! trust scope is (plan §5.4). An agent names itself with `--as` or `DEVAGOTCHI_ACTOR`
 //! and is then an agent (no force-release); a bare OS user is the human.
 //!
-//! Two faces behind one command line (`face.rs`): a project's local store, or — once
-//! `board bind` has named a hub in `.devagotchi/config.json` and an account is on file —
-//! the hub's board as that account (B11: the hub arbitrates; the agent's name is its seat
-//! there). Every command and every hook runs the same either way.
+//! Two faces behind one command line (`face.rs`): a project's standalone board in Postgres
+//! (`DEVAGOTCHI_BOARD_STORAGE_URL`, `project.rs`), or — once `board bind` has named a hub in
+//! `.devagotchi/config.json` and an account is on file — the hub's board as that account (B11:
+//! the hub arbitrates; the agent's name is its seat there). Every command and every hook runs
+//! the same either way.
 
 use std::{
     ffi::OsString,
@@ -69,6 +70,8 @@ pub struct Invocation {
     pub session_env: Option<String>,
     /// The OS user (`USER` / `USERNAME`).
     pub os_user: Option<String>,
+    /// `DEVAGOTCHI_BOARD_STORAGE_URL`, if set: the Postgres a standalone board is in.
+    pub storage_env: Option<String>,
     pub stdout_is_terminal: bool,
     /// `account.json`, for a bound project; none when the environment has no home.
     pub account_file: Option<PathBuf>,
@@ -101,8 +104,8 @@ pub fn plugin_host(var: impl Fn(&str) -> Option<OsString>) -> Option<String> {
 pub fn find_project_dir(start: &Path) -> Option<PathBuf> {
     let mut dir = Some(start.to_path_buf());
     while let Some(d) = dir {
-        // A project is wherever `.devagotchi/config.json` is: a local store (`init`) or a
-        // binding to a hub (`bind`) — both write it.
+        // A project is wherever `.devagotchi/config.json` is: a standalone board (`init`) or
+        // a binding to a hub (`bind`) — both write it.
         if d.join(BOARD_DIR).join("config.json").is_file() {
             return Some(d);
         }
@@ -245,16 +248,28 @@ pub fn run(mut invocation: Invocation, out: &mut dyn Write, err: &mut dyn Write)
         Ok(config) => config,
         Err(error) => return output.error(&error, None),
     };
-    // The face: the hub's board as the account when bound, else the local store.
+    // The face: the hub's board as the account when bound, else the standalone board, on a
+    // runtime of its own that outlives it (declared first, dropped last).
+    let local_runtime;
     let face: Box<dyn Face> = match &config.hub {
         Some(hub) => match remote_face(hub, &config, &invocation, &actor) {
             Ok(remote) => Box::new(remote),
             Err(error) => return output.error(&error, None),
         },
-        None => match open_project(&project_dir) {
-            Ok((_, board)) => Box::new(board),
-            Err(error) => return output.error(&error, None),
-        },
+        None => {
+            local_runtime = match crate::runtime() {
+                Ok(runtime) => runtime,
+                Err(error) => return output.error(&error, None),
+            };
+            match open_project(
+                &project_dir,
+                invocation.storage_env.as_deref(),
+                &local_runtime,
+            ) {
+                Ok((_, board)) => Box::new(board),
+                Err(error) => return output.error(&error, None),
+            }
+        }
     };
     if let Some(input) = hook_input {
         let env_file = std::env::var_os("CLAUDE_ENV_FILE").map(PathBuf::from);

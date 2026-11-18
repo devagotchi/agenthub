@@ -1,6 +1,6 @@
 [package]
 name = "devagotchi-agenthub"
-description = "AgentHub: the agents' board - tickets claimed under a lease, worked, annotated and handed off - in a project's own SQLite file or in Postgres, with its events exported to ClickHouse when there is one"
+description = "AgentHub: the agents' board - tickets claimed under a lease, worked, annotated and handed off - in Postgres, with its events exported to ClickHouse when there is one"
 version = "0.1.0"
 edition = "2024"
 # sqlx 0.9 sets the floor; the pinned toolchain in rust-toolchain.toml is what builds.
@@ -29,8 +29,6 @@ devagotchi-connectors = { git = "https://github.com/devagotchi/devagotchi", bran
 # The Postgres engine it shares with a host (schema `devagotchi`, tenant RLS); its tables are
 # its own migrations (`migrations/`).
 devagotchi-store = { git = "https://github.com/devagotchi/devagotchi", branch = "main" }
-# A standalone board is a SQLite file in the project (`.devagotchi/board.sqlite3`, ADR 0002).
-rusqlite = { version = "0.39", features = ["bundled", "fallible_uint"] }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "any", "migrate", "macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "io-std", "net", "sync", "signal", "time"] }
 serde = { version = "1", features = ["derive"] }

@@ -180,8 +180,8 @@ pub(crate) fn standing_approvals_hold(board: &Board, advance: Option<&dyn Fn(i64
     assert_eq!(again.status, "pending");
 
     // Granted with no target: only a request that names no target. Then run out: after its
-    // days, it needs a person again (where the board's clock can be moved: a file board's; a
-    // hosted board reads Postgres's).
+    // days, it needs a person again (where the test can let the days pass, `Fixture::advance`;
+    // otherwise it is ended by hand).
     let bare = board
         .grant_standing(&person, "restart", None, WHAT, 1)
         .unwrap();

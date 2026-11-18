@@ -1,13 +1,17 @@
-//! `board init`: the project's board folder, its .gitignore, and the AGENTS.md block that teaches an agent the workflow.
+//! `board init`: the project's board in Postgres, its folder and .gitignore, and the AGENTS.md
+//! block that teaches an agent the workflow.
 
 use devagotchi_contracts::BridgeError;
 
-use crate::{BOARD_DIR, BOARD_FILE, Board, ProjectConfig, default_prefix, read_project_config};
+use crate::{
+    BOARD_DIR, ProjectConfig, check_storage, default_prefix, open_board, project_name_from,
+    read_project_config, runtime, shown_storage, storage_url,
+};
 
 use super::{EXIT_OK, Invocation, Output, Parsed, write_json};
 
-/// What `.devagotchi/` keeps out of the repo: the store, the claim cache, the beat markers.
-pub(super) const LOCAL_GITIGNORE: &str = "# the board itself is local state; board.jsonl is the export to commit if you want diffs\nboard.sqlite3\nboard.sqlite3-wal\nboard.sqlite3-shm\nclaims/\nhooks/.last-beat-*\n";
+/// What `.devagotchi/` keeps out of the repo: the claim cache and the beat markers.
+pub(super) const LOCAL_GITIGNORE: &str = "# local state; board.jsonl is the export to commit if you want diffs\nclaims/\nhooks/.last-beat-*\n";
 
 pub(super) fn init(parsed: &Parsed, invocation: &Invocation, output: &mut Output<'_>) -> u8 {
     let project_dir = parsed
@@ -23,7 +27,7 @@ pub(super) fn init(parsed: &Parsed, invocation: &Invocation, output: &mut Output
         .or_else(|| {
             project_dir
                 .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
+                .map(|n| project_name_from(&n.to_string_lossy()))
         })
         .unwrap_or_else(|| "project".into());
     let prefix = parsed
@@ -31,13 +35,28 @@ pub(super) fn init(parsed: &Parsed, invocation: &Invocation, output: &mut Output
         .map(str::to_string)
         .or_else(|| existing.as_ref().map(|c| c.prefix.clone()))
         .unwrap_or_else(|| default_prefix(&project));
-    if let Err(error) = std::fs::create_dir_all(&board_dir) {
-        return output.error(&BridgeError::new("board_io", error.to_string()), None);
-    }
-    let board = match Board::open(&board_dir.join(BOARD_FILE), &project) {
+    let storage = match parsed.flag("--storage") {
+        Some(url) => match check_storage(url) {
+            Ok(()) => Some(url.to_string()),
+            Err(error) => return output.error(&error, None),
+        },
+        None => existing.as_ref().and_then(|c| c.storage.clone()),
+    };
+    let url = match storage_url(invocation.storage_env.as_deref(), storage.as_deref()) {
+        Ok(url) => url,
+        Err(error) => return output.error(&error, None),
+    };
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => return output.error(&error, None),
+    };
+    let board = match runtime.block_on(open_board(&url, &project, true)) {
         Ok(b) => b,
         Err(error) => return output.error(&error, None),
     };
+    if let Err(error) = std::fs::create_dir_all(&board_dir) {
+        return output.error(&BridgeError::new("board_io", error.to_string()), None);
+    }
     let config = ProjectConfig {
         project: project.clone(),
         prefix: board.prefix().to_string(),
@@ -46,7 +65,10 @@ pub(super) fn init(parsed: &Parsed, invocation: &Invocation, output: &mut Output
             .map(|c| c.created_at)
             .unwrap_or_else(|| board.now()),
         hub: existing.and_then(|c| c.hub),
+        storage,
     };
+    drop(board);
+    drop(runtime);
     if prefix != config.prefix {
         output.lines(&format!(
             "note: this board already uses prefix {}; --prefix {} ignored",
@@ -85,15 +107,15 @@ pub(super) fn init(parsed: &Parsed, invocation: &Invocation, output: &mut Output
         &serde_json::json!({
             "project": config.project,
             "prefix": config.prefix,
-            "board": board_dir.join(BOARD_FILE),
+            "storage": shown_storage(&url),
             "agents_md": agents_md,
         }),
         || {
             format!(
-                "board ready: {} (ids {}-…)\n  {}\n  AGENTS.md: {}\n  next: devagotchi board prime — or board onboard to paste the block elsewhere",
+                "board ready: {} (ids {}-…)\n  in {}\n  AGENTS.md: {}\n  next: devagotchi board prime — or board onboard to paste the block elsewhere",
                 config.project,
                 config.prefix,
-                board_dir.join(BOARD_FILE).display(),
+                shown_storage(&url),
                 agents_md
             )
         },
@@ -112,8 +134,8 @@ pub fn agents_md_block() -> String {
         "{AGENTS_MD_START}
 ## Board
 
-This project's tickets live in `.devagotchi/board.sqlite3` (the agents' board; contract in the
-devagotchi repository, `docs/agent-board.md`). Work from the board, not from memory:
+This project's tickets live on its board in Postgres (`devagotchi board init`; the agents' board,
+contract in the devagotchi repository, `docs/agent-board.md`). Work from the board, not from memory:
 
 - Start every session with `devagotchi board prime` (set `DEVAGOTCHI_ACTOR=<your-name>` first,
   for example `claude`, `codex`, `gemini`, `cursor`, `grok`): it lists what you hold, what is ready

@@ -1,5 +1,5 @@
 //! The board as the command line sees it: one set of operations, two faces. `Board` is
-//! the local store in `.devagotchi/`; `remote::Remote` is the same operations against the
+//! the project's standalone board in Postgres; `remote::Remote` is the same operations against the
 //! hosted hub's `board_*` tools, as the signed-in account (B11: a bound project's board of
 //! record is the hub, which arbitrates claims, leases and fences). The command line renders
 //! the same records either way and never knows which it got.

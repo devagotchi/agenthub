@@ -2,9 +2,9 @@
 
 use super::*;
 
-#[test]
-fn update_needs_the_current_version_and_a_declared_transition() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn update_needs_the_current_version_and_a_declared_transition() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let id = f.new_ticket(&jesse, "edit me");
     let ticket = f.board.get(&id).expect("get").ticket;
@@ -119,9 +119,9 @@ fn update_needs_the_current_version_and_a_declared_transition() {
     assert_eq!(held_err.code, "use_lease_ops");
 }
 
-#[test]
-fn list_filters_by_label_text_state_and_open_only() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn list_filters_by_label_text_state_and_open_only() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let a = f
         .board
@@ -205,36 +205,55 @@ fn list_filters_by_label_text_state_and_open_only() {
     );
 }
 
-#[test]
-fn notes_are_append_only_and_the_chain_notices_tampering() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn notes_are_append_only_and_the_chain_notices_tampering() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let id = f.new_ticket(&jesse, "audited");
     f.board
         .add_note(&jesse, &id, "note", "first", None, None)
         .expect("note");
-    {
-        let connection = f.board.local().expect("local board");
-        let refused = connection.execute("DELETE FROM notes", []);
-        assert!(refused.is_err(), "notes are append-only");
-        let refused = connection.execute("UPDATE events SET actor = 'mallory' WHERE seq = 1", []);
-        assert!(refused.is_err(), "events are append-only");
-        // Only a raw edit outside the triggers could break the chain; simulate one
-        // by dropping the trigger first, as an attacker with the file would.
-        connection
-            .execute_batch(
-                "DROP TRIGGER events_no_update; UPDATE events SET actor = 'mallory' WHERE seq = 1;",
+    let store = &f.test.store;
+    let tenant = |sql: &'static str| {
+        f.board.hosted().blocking(async move {
+            devagotchi_store::transaction!(store, |connection| {
+                store.scope(connection, crate::LOCAL_TENANT).await?;
+                sqlx::query(sql).execute(&mut *connection).await?;
+                Ok(())
+            })
+        })
+    };
+    assert!(
+        tenant("DELETE FROM board_notes").is_err(),
+        "notes are append-only"
+    );
+    assert!(
+        tenant("UPDATE board_events SET actor = 'mallory' WHERE seq = 1").is_err(),
+        "events are append-only"
+    );
+    // Only a raw edit outside the triggers could break the chain; simulate one by turning
+    // the trigger off first, as an attacker who owns the database would.
+    f.board
+        .hosted()
+        .blocking(async move {
+            sqlx::query(
+                "ALTER TABLE devagotchi.board_events DISABLE TRIGGER board_events_append_only",
             )
-            .expect("tamper");
-    }
+            .execute(store.admin())
+            .await
+            .map_err(|error| crate::fail("test", error.to_string()))?;
+            Ok(())
+        })
+        .expect("trigger off");
+    tenant("UPDATE board_events SET actor = 'mallory' WHERE seq = 1").expect("tamper");
     let status = f.board.verify_chain().expect("verify");
     assert!(!status.ok);
     assert_eq!(status.first_broken, Some(1));
 }
 
-#[test]
-fn workflow_replacement_is_validated_against_live_tickets() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn workflow_replacement_is_validated_against_live_tickets() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let id = f.new_ticket(&jesse, "in ready");
     let mut workflow = Workflow::default_workflow();
@@ -278,9 +297,9 @@ fn workflow_replacement_is_validated_against_live_tickets() {
     );
 }
 
-#[test]
-fn discovered_work_links_back_to_where_it_was_found() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn discovered_work_links_back_to_where_it_was_found() {
+    let f = or_skip!(fixture());
     let claude = Actor::agent("claude");
     let jesse = Actor::human("jesse");
     let parent = f.new_ticket(&jesse, "port the store");
@@ -289,7 +308,7 @@ fn discovered_work_links_back_to_where_it_was_found() {
         .create(
             &claude,
             NewTicket {
-                title: "rusqlite RETURNING needs 3.35".into(),
+                title: "the reaper wants an index on lease expiry".into(),
                 discovered_from: Some(parent.clone()),
                 ..NewTicket::default()
             },

@@ -35,8 +35,8 @@ pub(super) fn remote_face(
 
 /// `board bind [--hub URL] [--project NAME]`: the hub makes (or finds) the account's board
 /// for this project, and `.devagotchi/config.json` remembers the hub. A project without a
-/// local board gets its `.devagotchi/` here; one with a local board keeps it, unread from
-/// now on (the hub is the board of record; `unbind` goes back).
+/// standalone board gets its `.devagotchi/` here; one with a standalone board keeps it, unread
+/// from now on (the hub is the board of record; `unbind` goes back).
 pub(super) fn bind(
     parsed: &Parsed,
     invocation: &Invocation,
@@ -128,6 +128,7 @@ pub(super) fn bind(
             .unwrap_or_else(now_ms),
         project: project.clone(),
         hub: Some(hub.clone()),
+        storage: existing.as_ref().and_then(|c| c.storage.clone()),
     };
     if let Err(error) = write_json(&board_dir.join("config.json"), &config) {
         return output.error(&error, None);
@@ -141,7 +142,7 @@ pub(super) fn bind(
         &serde_json::json!({ "project": project, "hub": hub, "shared": shared, "created": !shared && bound["created"] == true, "boards": if shared { serde_json::json!([project]) } else { bound["boards"].clone() }, "limit": bound["limit"], "config": board_dir.join("config.json") }),
         || {
             format!(
-                "{} is bound to {hub} ({}); every `devagotchi board` command here now runs there as your account, your agents as seats. Local board file, if any, is no longer read. `board unbind` goes back.",
+                "{} is bound to {hub} ({}); every `devagotchi board` command here now runs there as your account, your agents as seats. The standalone board, if any, is no longer read. `board unbind` goes back.",
                 project,
                 if shared { "shared board attached" } else if bound["created"].as_bool() == Some(true) { "board made" } else { "board found" }
             )
@@ -150,14 +151,14 @@ pub(super) fn bind(
     EXIT_OK
 }
 
-/// `board unbind`: forget the hub; the local store (if any) is the board again.
+/// `board unbind`: forget the hub; the standalone board (if any) is the board again.
 pub(super) fn unbind(board_dir: &Path, output: &mut Output<'_>) -> u8 {
     let mut config = match read_project_config(board_dir) {
         Ok(config) => config,
         Err(error) => return output.error(&error, None),
     };
     let Some(hub) = config.hub.take() else {
-        output.lines("not bound: this project's board is the local store");
+        output.lines("not bound: this project's board is the standalone one");
         return EXIT_OK;
     };
     if let Err(error) = write_json(&board_dir.join("config.json"), &config) {
@@ -165,7 +166,7 @@ pub(super) fn unbind(board_dir: &Path, output: &mut Output<'_>) -> u8 {
     }
     output.value(&serde_json::json!({ "project": config.project, "unbound_from": hub }), || {
         format!(
-            "{} is no longer bound to {hub}; the local store is the board here (run `board init` if there is none). The hub keeps its board.",
+            "{} is no longer bound to {hub}; the standalone board is the board here (run `board init` if there is none). The hub keeps its board.",
             config.project
         )
     });

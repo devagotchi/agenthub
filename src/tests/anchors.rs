@@ -2,9 +2,9 @@
 
 use super::*;
 
-#[test]
-fn anchors_round_trip_through_create_update_and_list() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn anchors_round_trip_through_create_update_and_list() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let anchors = Anchors {
         machine: Some("dabo".into()),
@@ -137,9 +137,9 @@ fn anchors_round_trip_through_create_update_and_list() {
     assert_eq!(by(Anchors::default()).len(), 2);
 }
 
-#[test]
-fn an_environment_outside_the_boards_list_is_refused_with_the_list() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_outside_the_boards_list_is_refused_with_the_list() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let refused = f
         .board
@@ -201,9 +201,9 @@ fn an_environment_outside_the_boards_list_is_refused_with_the_list() {
     assert!(refused.message.contains("qa"), "{}", refused.message);
 }
 
-#[test]
-fn the_anchor_line_names_what_is_known_in_order() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn the_anchor_line_names_what_is_known_in_order() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let line = |anchors: Anchors| {
         f.board
@@ -241,9 +241,9 @@ fn the_anchor_line_names_what_is_known_in_order() {
     );
 }
 
-#[test]
-fn a_boards_repo_and_environments_are_set_checked_and_on_the_chain() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn a_boards_repo_and_environments_are_set_checked_and_on_the_chain() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let before = f.board.events(0, 1000).unwrap().len();
     let read = f

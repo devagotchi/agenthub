@@ -1,5 +1,6 @@
 //! A hosted board's life: one authority and atomic history, one winner among concurrent
-//! claims, and the inbox and standing approvals the local board has, held the same here.
+//! claims, and the inbox and standing approvals, held under a hub's tenant as on a standalone
+//! board.
 
 use devagotchi_store::{or_skip, transaction};
 
