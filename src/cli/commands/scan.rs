@@ -1,6 +1,6 @@
 //! `board scan [PATH] [--import]` (PATH: a folder or one file): preview what the scanner finds (`crate::scan`), each with
 //! the ticket it already is when one carries its fingerprint; `--import` adds the rest. The
-//! same on a local board and on a hub's board, since both go through the face.
+//! same on a standalone board and on a hub's board, since both go through the face.
 
 use serde::Serialize;
 

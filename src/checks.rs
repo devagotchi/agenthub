@@ -18,10 +18,6 @@ pub fn fail(code: &str, message: impl Into<String>) -> BridgeError {
     BridgeError::new(code, message)
 }
 
-pub fn store_error(error: rusqlite::Error) -> BridgeError {
-    BridgeError::new("board_store", error.to_string())
-}
-
 pub(crate) fn invalid(message: impl Into<String>) -> BridgeError {
     fail("invalid", message)
 }

@@ -2,31 +2,58 @@
 
 use super::*;
 
-#[test]
-fn open_seeds_meta_settings_and_workflow_once() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("board.sqlite3");
-    let board = Board::open(&path, "devagotchi").expect("open");
+#[tokio::test(flavor = "multi_thread")]
+async fn open_seeds_metadata_settings_and_workflow_once() {
+    let test = or_skip!(super::postgres());
+    let board = crate::open_board(&test.url, "devagotchi", true)
+        .await
+        .expect("open");
     assert_eq!(board.prefix(), "deva");
     assert_eq!(board.settings().expect("settings"), Settings::default());
     assert_eq!(
         board.workflow().expect("workflow"),
         Workflow::default_workflow()
     );
+    let id = board
+        .create(
+            &Actor::human("jesse"),
+            NewTicket {
+                title: "kept".into(),
+                ..NewTicket::default()
+            },
+        )
+        .expect("create")
+        .id;
+    let events = board.events(0, 100).expect("events");
     drop(board);
-    let again = Board::open(&path, "devagotchi").expect("reopen");
+    // Opened again (and made again by a second `board init`): the same board, as it was.
+    let again = crate::open_board(&test.url, "devagotchi", false)
+        .await
+        .expect("reopen");
     assert_eq!(again.prefix(), "deva");
+    assert_eq!(again.get(&id).expect("kept").ticket.title, "kept");
     drop(again);
-    let wrong = match Board::open(&path, "other") {
-        Ok(_) => panic!("another project must be refused"),
+    let again = crate::open_board(&test.url, "devagotchi", true)
+        .await
+        .expect("init again");
+    assert_eq!(again.events(0, 100).expect("events"), events);
+    // Another project is another board: never this one under a new name, and never made by
+    // opening it.
+    let missing = match crate::open_board(&test.url, "other", false).await {
+        Ok(_) => panic!("a board nobody made must not open"),
         Err(error) => error,
     };
-    assert_eq!(wrong.code, "board_mismatch");
+    assert_eq!(missing.code, "no_board");
+    let other = crate::open_board(&test.url, "other", true)
+        .await
+        .expect("made");
+    assert_eq!(other.prefix(), "othe");
+    assert_eq!(other.get(&id).expect_err("not here").code, "not_found");
 }
 
-#[test]
-fn ids_are_prefixed_hashes_and_children_are_hierarchical() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn ids_are_prefixed_hashes_and_children_are_hierarchical() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let epic = f
         .board
@@ -87,9 +114,9 @@ fn ids_are_prefixed_hashes_and_children_are_hierarchical() {
     assert_ne!(one, two);
 }
 
-#[test]
-fn claim_heartbeat_complete_moves_through_the_lanes() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn claim_heartbeat_complete_moves_through_the_lanes() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let claude = Actor::agent("claude");
     let codex = Actor::agent("codex");
@@ -127,8 +154,10 @@ fn claim_heartbeat_complete_moves_through_the_lanes() {
         .expect("heartbeat");
     assert_eq!(
         beat.lease_expires_at,
-        f.now.load(Ordering::SeqCst) + Settings::default().lease_ttl_ms
+        beat.ticket.heartbeat_at.expect("beaten") + Settings::default().lease_ttl_ms,
+        "a beat extends the lease by its ttl from now"
     );
+    assert!(beat.lease_expires_at >= lease.lease_expires_at);
     assert_eq!(
         beat.ticket.progress,
         Some(serde_json::json!({ "step": "tests" }))
@@ -181,9 +210,9 @@ fn claim_heartbeat_complete_moves_through_the_lanes() {
     );
 }
 
-#[test]
-fn expired_lease_goes_back_to_ready_and_the_old_fence_is_rejected() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn expired_lease_goes_back_to_ready_and_the_old_fence_is_rejected() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let claude = Actor::agent("claude");
     let codex = Actor::agent("codex");
@@ -214,9 +243,9 @@ fn expired_lease_goes_back_to_ready_and_the_old_fence_is_rejected() {
     assert_eq!(late_complete.code, "stale_fence");
 }
 
-#[test]
-fn reaper_sends_a_ticket_to_attention_after_too_many_expiries() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn reaper_sends_a_ticket_to_attention_after_too_many_expiries() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let agent = Actor::agent("flaky");
     let id = f.new_ticket(&jesse, "keeps dying");
@@ -255,9 +284,9 @@ fn reaper_sends_a_ticket_to_attention_after_too_many_expiries() {
     assert_eq!(back.state, "ready");
 }
 
-#[test]
-fn ready_excludes_blocked_tickets_until_the_blocker_is_done() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn ready_excludes_blocked_tickets_until_the_blocker_is_done() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let claude = Actor::agent("claude");
     let schema = f.new_ticket(&jesse, "schema");
@@ -323,9 +352,9 @@ fn ready_excludes_blocked_tickets_until_the_blocker_is_done() {
     assert_eq!(next.ticket.id, tools);
 }
 
-#[test]
-fn assigned_tickets_go_to_their_assignee_first_and_only() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn assigned_tickets_go_to_their_assignee_first_and_only() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let claude = Actor::agent("claude");
     let codex = Actor::agent("codex");
@@ -362,9 +391,9 @@ fn assigned_tickets_go_to_their_assignee_first_and_only() {
     );
 }
 
-#[test]
-fn wip_limit_stops_a_second_claim() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn wip_limit_stops_a_second_claim() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let one = f.new_ticket(&jesse, "one");
     let two = f.new_ticket(&jesse, "two");
@@ -394,9 +423,9 @@ fn wip_limit_stops_a_second_claim() {
         .expect("0 = unlimited");
 }
 
-#[test]
-fn handoff_notes_releases_and_assigns_in_one_step() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn handoff_notes_releases_and_assigns_in_one_step() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let claude = Actor::agent("claude");
     let id = f.new_ticket(&jesse, "cross-vendor");
@@ -426,9 +455,9 @@ fn handoff_notes_releases_and_assigns_in_one_step() {
     assert_eq!(view.notes[0].fence, Some(lease.fence));
 }
 
-#[test]
-fn force_release_is_for_humans_with_a_reason() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn force_release_is_for_humans_with_a_reason() {
+    let f = or_skip!(fixture());
     let jesse = Actor::human("jesse");
     let claude = Actor::agent("claude");
     let id = f.new_ticket(&jesse, "stuck");

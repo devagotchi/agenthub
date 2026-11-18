@@ -1,4 +1,4 @@
-//! Native hosted-board transactions. Never opens a local board or falls back to SQLite.
+//! A board in Postgres: its transactions, under the tenant and board id its caller resolved.
 
 use devagotchi_contracts::BridgeResult;
 use serde::de::DeserializeOwned;

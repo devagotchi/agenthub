@@ -11,20 +11,6 @@ pub struct Anchors {
     pub fingerprint: Option<String>,
 }
 
-impl Anchors {
-    /// Column name and value, in column order.
-    pub(crate) fn columns(&self) -> [(&'static str, &Option<String>); 6] {
-        [
-            ("machine", &self.machine),
-            ("repo", &self.repo),
-            ("environment", &self.environment),
-            ("agent", &self.agent),
-            ("session", &self.session),
-            ("fingerprint", &self.fingerprint),
-        ]
-    }
-}
-
 /// An edit to the anchors: `Some(None)` clears one, `None` leaves it.
 #[derive(Debug, Clone, Default)]
 pub struct AnchorPatch {

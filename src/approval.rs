@@ -22,14 +22,10 @@
 //! the agent run that: the hub does not check commands against approvals.
 
 use devagotchi_contracts::BridgeResult;
-use rusqlite::{OptionalExtension, params};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{
-    Actor, Board, Filter, StateKind, Ticket, Workflow, fail, insert_note, invalid, load_workflow,
-    read_ticket, store_error,
-};
+use super::{Actor, Board, Filter, StateKind, Workflow, fail, invalid};
 use crate::valid_name;
 
 pub const KIND: &str = "approval";
@@ -295,37 +291,10 @@ impl Board {
         labels: &[String],
     ) -> BridgeResult<ApprovalStatus> {
         let (title, what, why, undo) = (ask.title, ask.what, ask.why, ask.undo);
-        if let Some(hosted) = &self.hosted {
-            return self.hosted_call(
-                hosted.request_approval(actor, title, what, why, undo, labels),
-                true,
-            );
-        }
-        let labels = serde_json::to_string(labels).expect("labels json");
-        let title = text("title", title, 300, true)?;
-        let what = text("what", what, 4000, true)?;
-        let why = text("why", why, 4000, false)?;
-        let undo = text("undo", undo, 4000, false)?;
-        let description = format!("What: {what}\n\nWhy: {why}\n\nUndo: {undo}");
-        let id = self.write(actor, |w| {
-            let workflow = load_workflow(w.tx)?;
-            let id = w.fresh_id(&self.prefix, &self.project, &title, actor.id)?;
-            w.tx.execute(
-                "INSERT INTO tickets (id, kind, title, description, state, priority, labels, parent,
-                   assignee, created_by, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 1, ?8, NULL, NULL, ?6, ?7, ?7)",
-                params![id, KIND, title, description, workflow.attention_state, actor.id, w.now, labels],
-            )
-            .map_err(store_error)?;
-            w.event(
-                "approval.requested",
-                Some(&id),
-                None,
-                serde_json::json!({ "title": title }),
-            )?;
-            Ok(id)
-        })?;
-        self.approval_status(&id)
+        self.hosted_call(
+            self.hosted
+                .request_approval(actor, title, what, why, undo, labels),
+        )
     }
 
     /// A person approves or denies `id` as they saw it at `version`.
@@ -337,72 +306,14 @@ impl Board {
         verdict: Verdict,
         note: &str,
     ) -> BridgeResult<ApprovalStatus> {
-        if let Some(hosted) = &self.hosted {
-            return self.hosted_call(
-                hosted.decide_approval(actor, id, version, verdict, note),
-                true,
-            );
-        }
-        if !actor.human {
-            return Err(fail("humans_only", "only a person can approve or deny"));
-        }
-        let note = text("note", note, 2000, false)?;
-        self.write(actor, |w| {
-            let workflow = load_workflow(w.tx)?;
-            let ticket = read_ticket(w.tx, &workflow, id, w.now)?;
-            if ticket.kind != KIND {
-                return Err(fail("not_an_approval", format!("{id} is not an approval")));
-            }
-            if ticket.state != workflow.attention_state {
-                return Err(fail("already_decided", format!("{id} is already decided")));
-            }
-            if ticket.version != version {
-                return Err(fail(
-                    "approval_changed",
-                    format!("{id} changed since you saw it; look again before deciding"),
-                ));
-            }
-            let to = landing(&workflow, verdict)?;
-            w.tx.execute(
-                "UPDATE tickets SET state = ?2, closed_at = ?3, version = version + 1, updated_at = ?3
-                 WHERE id = ?1",
-                params![id, to, w.now],
-            )
-            .map_err(store_error)?;
-            if !note.is_empty() {
-                insert_note(w.tx, id, actor.id, "decision", &note, None, None, w.now)?;
-            }
-            w.event(
-                "approval.decided",
-                Some(id),
-                None,
-                serde_json::json!({ "verdict": verdict, "note": note, "to": to }),
-            )?;
-            Ok(())
-        })?;
-        self.approval_status(id)
+        self.hosted_call(
+            self.hosted
+                .decide_approval(actor, id, version, verdict, note),
+        )
     }
 
     pub fn approval_status(&self, id: &str) -> BridgeResult<ApprovalStatus> {
-        if let Some(hosted) = &self.hosted {
-            return self.hosted_call(hosted.approval_status(id), false);
-        }
-        let connection = self.local()?;
-        let workflow = load_workflow(&connection)?;
-        let ticket = read_ticket(&connection, &workflow, id, self.now())?;
-        if ticket.kind != KIND {
-            return Err(fail("not_an_approval", format!("{id} is not an approval")));
-        }
-        let decision: Option<(String, i64, String)> = connection
-            .query_row(
-                "SELECT actor, at, data FROM events WHERE ticket = ?1 AND action = 'approval.decided'
-                 ORDER BY seq DESC LIMIT 1",
-                params![id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()
-            .map_err(store_error)?;
-        Ok(status_of(ticket, decision))
+        self.hosted_call(self.hosted.approval_status(id))
     }
 
     /// A person approves the exact command `what` of `kind` (on `target`) ahead of time on
@@ -557,51 +468,6 @@ impl Board {
 
     /// Approvals waiting for a person, oldest first.
     pub fn pending_approvals(&self) -> BridgeResult<Vec<ApprovalStatus>> {
-        if let Some(hosted) = &self.hosted {
-            return self.hosted_call(hosted.pending_approvals(), false);
-        }
-        let ids: Vec<String> = {
-            let connection = self.local()?;
-            let workflow = load_workflow(&connection)?;
-            let mut statement = connection
-                .prepare(
-                    "SELECT id FROM tickets WHERE kind = ?1 AND state = ?2 ORDER BY created_at, id",
-                )
-                .map_err(store_error)?;
-            let rows = statement
-                .query_map(params![KIND, workflow.attention_state], |row| row.get(0))
-                .map_err(store_error)?;
-            rows.collect::<Result<_, _>>().map_err(store_error)?
-        };
-        ids.iter().map(|id| self.approval_status(id)).collect()
-    }
-}
-
-fn status_of(ticket: Ticket, decision: Option<(String, i64, String)>) -> ApprovalStatus {
-    let (status, decided_by, decided_at, note) = match decision {
-        Some((by, at, data)) => {
-            let data: serde_json::Value = serde_json::from_str(&data).unwrap_or_default();
-            let verdict = data["verdict"].as_str().unwrap_or("denied").to_string();
-            let note = data["note"]
-                .as_str()
-                .filter(|n| !n.is_empty())
-                .map(str::to_string);
-            (verdict, Some(by), Some(at), note)
-        }
-        None => ("pending".to_string(), None, None, None),
-    };
-    ApprovalStatus {
-        kind: label_value(&ticket.labels, "kind:"),
-        target: label_value(&ticket.labels, "target:"),
-        id: ticket.id,
-        title: ticket.title,
-        status,
-        description: ticket.description,
-        requested_by: ticket.created_by,
-        requested_at: ticket.created_at,
-        version: ticket.version,
-        decided_by,
-        decided_at,
-        note,
+        self.hosted_call(self.hosted.pending_approvals())
     }
 }

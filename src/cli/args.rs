@@ -6,9 +6,9 @@ use crate::Anchors;
 
 pub const USAGE: &str = "Usage: devagotchi board <command> [options]
 
-  init      [--project NAME] [--prefix P] [--agents-md]   create .devagotchi/ here; --agents-md appends the AGENTS.md block
+  init      [--project NAME] [--prefix P] [--storage URL] [--agents-md]   make the board and .devagotchi/ here; --agents-md appends the AGENTS.md block
   bind      [--hub URL] [--project NAME] [--shared]   bind your account's board, or attach a granted configured shared board
-  unbind                           back to the local store (the hub keeps its board)
+  unbind                           back to the standalone board (the hub keeps its board)
   prime     [--limit N]            what to do now: held, ready, notes to you, the protocol (≤ 50 lines)
   onboard                          print the AGENTS.md block
   agent                            print the full workflow for an agent
@@ -39,6 +39,7 @@ pub const USAGE: &str = "Usage: devagotchi board <command> [options]
 ANCHORS: --machine M --repo URL --env E --agent A --session S --fingerprint F   where a ticket belongs; on ls, filters
 Global: --dir PATH (project directory; default: walk up from here)  --as ID (act as this agent)
         --json (also on when stdout is not a terminal)  --text (force the human form)  --quiet
+Standalone board: in the Postgres DEVAGOTCHI_BOARD_STORAGE_URL names, else the project's (init --storage URL, no password in it).
 Bound project: every command above runs on the hub as the signed-in account; --as / DEVAGOTCHI_ACTOR is your seat there.
 Exit codes: 0 ok · 2 conflict (fence, version, held, blocked, WIP) · 3 refused · 4 not found · 5 board unavailable · 64 usage";
 
@@ -54,6 +55,7 @@ pub(super) const VALUE_FLAGS: &[&str] = &[
     "--as",
     "--project",
     "--prefix",
+    "--storage",
     "--hub",
     "--limit",
     "--state",

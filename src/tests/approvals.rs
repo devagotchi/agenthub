@@ -2,10 +2,10 @@
 
 use super::*;
 
-#[test]
-fn an_approval_waits_for_a_person_and_records_the_verdict() {
+#[tokio::test(flavor = "multi_thread")]
+async fn an_approval_waits_for_a_person_and_records_the_verdict() {
     use crate::approval::Verdict;
-    let f = fixture();
+    let f = or_skip!(fixture());
     let agent = Actor::agent("claude");
     let person = Actor::human("jesse");
     let asked = f
@@ -114,8 +114,8 @@ fn an_approval_waits_for_a_person_and_records_the_verdict() {
     );
 }
 
-#[test]
-fn a_kind_approved_ahead_of_time_is_approved_the_moment_it_is_asked() {
-    let f = fixture();
+#[tokio::test(flavor = "multi_thread")]
+async fn a_kind_approved_ahead_of_time_is_approved_the_moment_it_is_asked() {
+    let f = or_skip!(fixture());
     super::standing::standing_approvals_hold(&f.board, Some(&|ms| f.advance(ms)));
 }

@@ -1,7 +1,7 @@
 //! AgentHub (`devagotchi-agenthub`): the agents' board. Tickets any subscription claims under a
-//! lease, works, annotates and hands off: a standalone board in `<project>/.devagotchi/
-//! board.sqlite3` (ADR 0002), a hosted one in Postgres (`hosted`, tables by `migrations`); notes
-//! that reach agents (`inbox`, `wake`), approvals (`approval`), GitHub issues (`issue_lifecycle`)
+//! lease, works, annotates and hands off, in Postgres (`hosted`, tables by `migrations`): a
+//! project's standalone board under a local tenant (`project.rs`), or a hub's; notes that reach
+//! agents (`inbox`, `wake`), approvals (`approval`), GitHub issues (`issue_lifecycle`)
 //! and the `board` command line (`cli`). Its Postgres engine is `devagotchi-store`; the hub's MCP
 //! tools, tenant registry and pages are the hub's (`crates/hub/src/agenthub/`). Contract:
 //! `docs/agent-board.md`. A ticket coordinates and remembers; a broker operation executes.
@@ -19,7 +19,6 @@ pub mod hosted;
 pub mod inbox;
 pub mod issue_lifecycle;
 mod lease;
-mod local;
 pub mod migrations;
 mod project;
 pub mod scan;
@@ -31,11 +30,10 @@ pub mod workflow;
 
 pub use anchors::{AnchorPatch, Anchors};
 pub use board::{Board, Held, NoteToMe, PROTOCOL_LINE, Prime, Ready};
-pub use chain::{GENESIS, Writer, event_from_row, event_hash};
-pub use checks::{fail, store_error, valid_name};
+pub use chain::{GENESIS, event_hash};
+pub use checks::{fail, valid_name};
 pub use clock::{Clock, system_clock, utc};
 pub use lease::{Lease, NextFilter};
-pub use local::{SCHEMA_VERSION, insert_note, load_settings, load_workflow, read_ticket};
 pub use project::*;
 pub use settings::{ProjectSettings, Settings};
 pub use ticket::{
@@ -43,12 +41,12 @@ pub use ticket::{
 };
 pub use workflow::{StateKind, Workflow};
 
+/// The board layout a board's metadata names (`schema_version`): 2 since tickets carry
+/// anchors. The tables themselves are `migrations/`.
+const SCHEMA_VERSION: i64 = 2;
+
 use anchors::clean_anchor;
 use checks::invalid;
-use local::{
-    SCHEMA, insert_dep, list_tickets, migrate_v1, note_from_row, open_blockers, reaches, read_deps,
-    read_note, read_notes, ticket_from_row, upgrade_default_workflow,
-};
 use settings::{check_environment, check_environments, check_repo};
 use ticket::clean_labels;
 use workflow::check_transition;

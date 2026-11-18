@@ -22,10 +22,8 @@ pub(super) fn exit_code_for(code: &str) -> u8 {
             EXIT_CONFLICT
         }
         "not_found" => EXIT_NOT_FOUND,
-        "board_store" | "board_open" | "board_mismatch" | "board_version" | "board_random"
-        | "board_id" | "no_board" | "board_io" | "hub_unreachable" | "hub_error" => {
-            EXIT_UNAVAILABLE
-        }
+        "board_store" | "board_random" | "board_id" | "no_board" | "no_storage"
+        | "board_runtime" | "board_io" | "hub_unreachable" | "hub_error" => EXIT_UNAVAILABLE,
         "usage" => EXIT_USAGE,
         _ => EXIT_REFUSED,
     }
@@ -68,6 +66,12 @@ pub(super) fn next_for(code: &str, id: Option<&str>) -> String {
         }
         "not_found" => "board ls --open to see the ids on this board".into(),
         "no_board" => "run board init in the project directory, or pass --dir".into(),
+        "no_storage" => {
+            "set DEVAGOTCHI_BOARD_STORAGE_URL to a postgres:// URL (or board init --storage URL, no password in it), or board bind --hub URL".into()
+        }
+        "invalid_storage" => {
+            "name the Postgres without a password: PGPASSWORD or ~/.pgpass holds it, or set DEVAGOTCHI_BOARD_STORAGE_URL".into()
+        }
         "usage" => "board --help".into(),
         _ => "board --help".into(),
     }

@@ -185,11 +185,7 @@ fn apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Board, NewTicket};
-    use std::sync::{
-        Arc,
-        atomic::{AtomicI64, Ordering},
-    };
+    use crate::NewTicket;
 
     fn invoke(
         board: &dyn Face,
@@ -234,18 +230,12 @@ mod tests {
         assert!(read_input(br#"{"hook_event_name":"SessionStart","session_id":"4f1c-9a.b_2","source":"resume"}"#.as_slice()).is_ok());
     }
 
-    #[test]
-    fn native_hooks_preserve_context_throttle_beats_and_report_interruption_without_mutating_other_sessions()
+    #[tokio::test(flavor = "multi_thread")]
+    async fn native_hooks_preserve_context_throttle_beats_and_report_interruption_without_mutating_other_sessions()
      {
+        let f = crate::tests::or_skip!(crate::tests::fixture());
         let dir = tempfile::tempdir().unwrap();
-        let now = Arc::new(AtomicI64::new(1_700_000_000_000));
-        let clock = now.clone();
-        let board = Board::open_with_clock(
-            &dir.path().join("board.sqlite3"),
-            "demo",
-            Arc::new(move || clock.load(Ordering::SeqCst)),
-        )
-        .unwrap();
+        let board = &f.board;
         let actor = Actor::agent("claude");
         let ticket = board
             .create(
@@ -269,7 +259,7 @@ mod tests {
             .unwrap();
         let env = dir.path().join("environment");
         let (code, out, err) = invoke(
-            &board,
+            board,
             "session-start",
             r#"{"hook_event_name":"SessionStart","session_id":"session-1","source":"resume"}"#,
             Some(&env),
@@ -292,12 +282,12 @@ mod tests {
             "export DEVAGOTCHI_SESSION=session-1\n"
         );
         let count = board.events(0, 100).unwrap().len();
-        let (code, out, _) = invoke(&board, "beat", r#"{"hook_event_name":"PostToolUse"}"#, None);
+        let (code, out, _) = invoke(board, "beat", r#"{"hook_event_name":"PostToolUse"}"#, None);
         assert_eq!(code, EXIT_OK);
         assert_eq!(out.trim(), "{}");
         assert_eq!(board.events(0, 100).unwrap().len(), count);
-        now.fetch_add(held.heartbeat_every_ms + 1, Ordering::SeqCst);
-        let (code, _, err) = invoke(&board, "beat", r#"{"hook_event_name":"PostToolUse"}"#, None);
+        f.advance(held.heartbeat_every_ms + 1);
+        let (code, _, err) = invoke(board, "beat", r#"{"hook_event_name":"PostToolUse"}"#, None);
         assert_eq!(code, EXIT_OK, "{err}");
         assert!(
             board
@@ -306,10 +296,12 @@ mod tests {
                 .ticket
                 .lease_expires_at
                 .unwrap()
-                > held.lease_expires_at
+                > held.lease_expires_at - held.heartbeat_every_ms - 1,
+            "the beat extended the lease that was due"
         );
+        assert_eq!(board.events(0, 100).unwrap().len(), count + 1);
         let (code, _, err) = invoke(
-            &board,
+            board,
             "stop",
             r#"{"hook_event_name":"Stop","stop_hook_active":false}"#,
             None,
@@ -317,7 +309,7 @@ mod tests {
         assert_eq!(code, EXIT_CONFLICT);
         assert!(err.contains(&ticket.id), "{err}");
         let (code, _, err) = invoke(
-            &board,
+            board,
             "stop",
             r#"{"hook_event_name":"Stop","stop_hook_active":true}"#,
             None,
@@ -329,7 +321,7 @@ mod tests {
             Some("claude")
         );
         let (code, _, err) = invoke(
-            &board,
+            board,
             "session-end",
             r#"{"hook_event_name":"SessionEnd"}"#,
             None,
@@ -344,11 +336,11 @@ mod tests {
                 None,
             )
             .unwrap();
-        let (code, out, err) = invoke(&board, "stop", r#"{"hook_event_name":"Stop"}"#, None);
+        let (code, out, err) = invoke(board, "stop", r#"{"hook_event_name":"Stop"}"#, None);
         assert_eq!(code, EXIT_OK, "{err}");
         assert_eq!(out.trim(), "{}");
         assert!(board.verify_chain().unwrap().ok);
-        let (code, _, err) = invoke(&board, "beat", r#"{"hook_event_name":"Stop"}"#, None);
+        let (code, _, err) = invoke(board, "beat", r#"{"hook_event_name":"Stop"}"#, None);
         assert_eq!(code, EXIT_CONFLICT);
         assert!(err.contains("does not match"), "{err}");
     }

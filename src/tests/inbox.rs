@@ -175,7 +175,7 @@ async fn a_tenants_webhook_cannot_reach_the_hubs_own_network() {
     assert!(wake::target("http://127.0.0.1:9/hook", true).await.is_ok());
 }
 
-/// The rules on a real board: file-backed here, Postgres in `hosted/tests.rs`.
+/// The rules on a real board: a standalone one here, a hub's in `hosted_lifecycle.rs`.
 pub(crate) fn inbox_holds(board: &Board) {
     let claude = Actor::agent("claude");
     let codex = Actor::agent("codex");
@@ -271,10 +271,12 @@ pub(crate) fn inbox_holds(board: &Board) {
     );
 }
 
-#[test]
-fn notes_reach_who_they_are_for_on_a_file_board() {
-    let f = super::fixture();
-    inbox_holds(&f.board);
+#[tokio::test(flavor = "multi_thread")]
+async fn notes_reach_who_they_are_for_on_a_standalone_board() {
+    let f = super::or_skip!(super::fixture());
+    tokio::task::spawn_blocking(move || inbox_holds(&f.board))
+        .await
+        .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -304,8 +306,8 @@ async fn a_webhook_takes_the_notes_once_and_a_refusal_keeps_them() {
     let port = listener.local_addr().unwrap().port();
     tokio::spawn(async move { axum::serve(listener, app).await });
 
-    let dir = tempfile::tempdir().unwrap();
-    let board = Arc::new(Board::open(&dir.path().join("board.sqlite3"), "alpha").unwrap());
+    let test = super::or_skip!(super::postgres());
+    let board = Arc::new(crate::open_board(&test.url, "alpha", true).await.unwrap());
     let url = format!("http://127.0.0.1:{port}/hook");
     let (secret, delivery, wake_row) = {
         let board = board.clone();

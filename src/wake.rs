@@ -16,11 +16,10 @@ use std::{
 
 use devagotchi_contracts::{BridgeError, BridgeResult};
 use hmac::{Hmac, KeyInit, Mac};
-use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
-use super::{Actor, Board, inbox::InboxNote, invalid, store_error};
+use super::{Actor, Board, inbox::InboxNote, invalid};
 
 pub const SCHEMA: &str = "devagotchi.notes/v1";
 pub const KEY: &str = "wakes";
@@ -251,21 +250,7 @@ pub async fn flush(
 
 impl Board {
     pub fn wakes(&self) -> BridgeResult<Wakes> {
-        if let Some(hosted) = &self.hosted {
-            return self.hosted_call(hosted.wakes(), false);
-        }
-        let connection = self.local()?;
-        let raw: Option<String> = connection
-            .query_row(
-                "SELECT value FROM settings WHERE key = ?1",
-                params![KEY],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(store_error)?;
-        Ok(raw
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default())
+        self.hosted_call(self.hosted.wakes())
     }
 
     /// Point `recipient` at `url`, or take its webhook away. A new secret comes back once.
@@ -297,20 +282,7 @@ impl Board {
             }
         }
         let detail = serde_json::json!({ "recipient": recipient, "url": url });
-        if let Some(hosted) = &self.hosted {
-            self.hosted_call(hosted.save_wakes(actor, &wakes, detail), true)?;
-            return Ok(secret);
-        }
-        self.write(actor, |w| {
-            w.tx.execute(
-                "INSERT INTO settings (key, value) VALUES (?1, ?2)
-                 ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                params![KEY, serde_json::to_string(&wakes).expect("wakes json")],
-            )
-            .map_err(store_error)?;
-            w.event("notes.wake_set", None, None, detail)?;
-            Ok(())
-        })?;
+        self.hosted_call(self.hosted.save_wakes(actor, &wakes, detail))?;
         Ok(secret)
     }
 }
