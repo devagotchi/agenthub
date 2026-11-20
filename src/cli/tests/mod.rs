@@ -60,6 +60,8 @@ fn json(text: &str) -> serde_json::Value {
     serde_json::from_str(text.lines().next().unwrap_or("")).expect("one json line")
 }
 
+mod search;
+
 #[tokio::test(flavor = "multi_thread")]
 async fn board_settings_names_the_repo_and_environments_of_a_local_board() {
     on_postgres(|| {

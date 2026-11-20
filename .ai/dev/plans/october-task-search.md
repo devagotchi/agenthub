@@ -24,3 +24,13 @@ including deliberately identical task IDs in separate scopes. Formatting and dif
 passed. Source comparison confirmed the original uses the `simple` text-search dictionary.
 Push/PR/main: pending. Parent browser/MCP/CLI verification remains pending.
 No claim that the whole October branch is absorbed.
+
+Follow-up found by parent bound-CLI acceptance: the parser treats every `--text` as
+an output switch before checking value flags, so `ls --text QUERY` never filters.
+Branch `increment-279/fix-cli-search` from merged PR10 (`8fed602`) resolves `--text`
+after `ls` as the documented query; `--human` explicitly requests human output.
+The existing `--text` output alias remains on other commands. A standalone CLI test
+must verify ID/note/substring queries, JSON and human output, `--text=value`, and missing
+query refusal. All 94 AgentHub tests passed against required isolated PostgreSQL, including
+that actual CLI regression test; formatting and diff checks passed. Parent bound-CLI
+acceptance is running. Follow-up push/PR/main pending.
