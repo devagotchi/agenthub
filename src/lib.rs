@@ -39,8 +39,8 @@ pub use project::*;
 pub use provenance::{TicketProvenance, TicketSource};
 pub use settings::{ProjectSettings, Settings};
 pub use ticket::{
-    Actor, ChainStatus, Dep, DepKind, Event, Filter, NewTicket, Note, Patch, Ticket, TicketView,
-    UNDO_MS,
+    Actor, ChainStatus, Dep, DepKind, Event, EventFilter, Filter, NewTicket, Note, Patch, Ticket,
+    TicketView, UNDO_MS,
 };
 pub use workflow::{StateKind, Workflow};
 

@@ -109,6 +109,7 @@ mod actions;
 mod anchors;
 mod approvals;
 mod create_dependencies;
+mod event_filters;
 mod hosted;
 mod hosted_lifecycle;
 mod inbox;
