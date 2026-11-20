@@ -136,7 +136,9 @@ pub fn run(mut invocation: Invocation, out: &mut dyn Write, err: &mut dyn Write)
     }
     let json = parsed.command != "hook"
         && (parsed.switch("--json")
-            || (!invocation.stdout_is_terminal && !parsed.switch("--text")));
+            || (!invocation.stdout_is_terminal
+                && !parsed.switch("--text")
+                && !parsed.switch("--human")));
     let mut output = Output {
         json,
         quiet: parsed.switch("--quiet"),

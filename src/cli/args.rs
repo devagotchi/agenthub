@@ -39,7 +39,8 @@ pub const USAGE: &str = "Usage: devagotchi board <command> [options]
 
 ANCHORS: --machine M --repo URL --env E --agent A --session S --fingerprint F   where a ticket belongs; on ls, filters
 Global: --dir PATH (project directory; default: walk up from here)  --as ID (act as this agent)
-        --json (also on when stdout is not a terminal)  --text (force the human form)  --quiet
+        --json (also on when stdout is not a terminal)  --human (force the human form)  --quiet
+        --text is a human-output alias except after ls, where --text QUERY searches tasks.
 Standalone board: in the Postgres DEVAGOTCHI_BOARD_STORAGE_URL names, else the project's (init --storage URL, no password in it).
 Bound project: every command above runs on the hub as the signed-in account; --as / DEVAGOTCHI_ACTOR is your seat there.
 Exit codes: 0 ok · 2 conflict (fence, version, held, blocked, WIP, source) · 3 refused · 4 not found · 5 board unavailable · 64 usage";
@@ -89,6 +90,7 @@ pub(super) const VALUE_FLAGS: &[&str] = &[
 
 pub(super) const SWITCHES: &[&str] = &[
     "--json",
+    "--human",
     "--text",
     "--quiet",
     "--agents-md",
@@ -115,7 +117,8 @@ pub(super) fn parse(args: &[OsString]) -> Result<Parsed, String> {
         }
         if let Some(stripped) = arg.strip_prefix("--") {
             let name = format!("--{}", stripped.split('=').next().unwrap_or(""));
-            if SWITCHES.contains(&name.as_str()) {
+            let search = name == "--text" && command.as_deref() == Some("ls");
+            if SWITCHES.contains(&name.as_str()) && !search {
                 switches.push(name);
             } else if VALUE_FLAGS.contains(&name.as_str()) {
                 let value = match arg.split_once('=') {
