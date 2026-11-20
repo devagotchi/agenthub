@@ -194,6 +194,20 @@ pub struct Event {
     pub hash: String,
 }
 
+/// Selection of a page in one board's append-only event chain.
+#[derive(Debug, Clone, Default)]
+pub struct EventFilter {
+    pub after_seq: i64,
+    pub before_seq: Option<i64>,
+    pub actor: Option<String>,
+    /// A literal prefix; one trailing `*` is accepted as shorthand.
+    pub action_prefix: Option<String>,
+    pub ticket: Option<String>,
+    pub descending: bool,
+    /// Default 200, clamped to 1..=1000.
+    pub limit: Option<usize>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TicketView {
     pub ticket: Ticket,

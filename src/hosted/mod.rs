@@ -16,6 +16,7 @@ use super::{
 use devagotchi_store::{Failed, Store, transaction};
 
 mod approvals;
+mod events;
 mod graph;
 mod inbox;
 mod issues;
@@ -392,39 +393,6 @@ impl HostedBoard {
             .execute(&mut *connection)
             .await?;
         Ok(())
-    }
-
-    pub async fn events(&self) -> BridgeResult<Vec<Event>> {
-        self.events_page(0, usize::MAX).await
-    }
-
-    pub async fn events_page(&self, after: i64, limit: usize) -> BridgeResult<Vec<Event>> {
-        transaction!(&self.store, |connection| {
-            self.scope(connection).await?;
-            let rows: Vec<String> = sqlx::query_scalar(
-                "SELECT row_to_json(e)::text FROM board_events e
-                 WHERE tenant_id=$1 AND board_id=$2 AND seq>$3 ORDER BY seq LIMIT $4",
-            )
-            .bind(&self.tenant)
-            .bind(&self.project)
-            .bind(after)
-            .bind(i64::try_from(limit.max(1)).unwrap_or(i64::MAX))
-            .fetch_all(&mut *connection)
-            .await?;
-            let mut events = Vec::with_capacity(rows.len());
-            for text in rows {
-                let mut value: serde_json::Value = decode(&text)?;
-                let data = value["data"]
-                    .as_str()
-                    .ok_or_else(|| fail("board_damaged", "invalid event data"))?;
-                value["data"] = decode(data)?;
-                events.push(
-                    serde_json::from_value(value)
-                        .map_err(|error| fail("board_damaged", error.to_string()))?,
-                );
-            }
-            Ok(events)
-        })
     }
 }
 

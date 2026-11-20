@@ -17,6 +17,10 @@ impl Board {
         self.hosted_call(self.hosted.events_page(after_seq, limit))
     }
 
+    pub fn events_matching(&self, filter: &crate::EventFilter) -> BridgeResult<Vec<Event>> {
+        self.hosted_call(self.hosted.events_matching(filter))
+    }
+
     /// Recompute the event chain. The first broken seq, if any, is reported, never hidden.
     pub fn verify_chain(&self) -> BridgeResult<ChainStatus> {
         self.hosted_call(self.hosted.verify_chain())
