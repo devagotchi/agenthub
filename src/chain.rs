@@ -35,13 +35,18 @@ pub mod actions {
     pub const BOARD_SETTINGS_REPLACED: &str = "board.settings_replaced";
     /// Was `admin.workflow.put` before B3.
     pub const BOARD_WORKFLOW_REPLACED: &str = "board.workflow_replaced";
+    pub const WORKFLOW_PUBLISHED: &str = "workflow.published";
+    pub const WORKFLOW_EDITED: &str = "workflow.edited";
+    pub const WORKFLOW_DELETED: &str = "workflow.deleted";
+    pub const WORKFLOW_BOUND: &str = "workflow.bound";
+    pub const WORKFLOW_DETACHED: &str = "workflow.detached";
     pub const ISSUE_PROJECTED: &str = "issue.projected";
     pub const ISSUE_CONTEXT_ADDED: &str = "issue.context_added";
     /// Was `notes.wake_set` before B3.
     pub const WAKE_SET: &str = "wake.set";
 
     /// Every action, in the order above.
-    pub const ALL: [&str; 23] = [
+    pub const ALL: [&str; 28] = [
         TICKET_CREATED,
         TICKET_UPDATED,
         TICKET_CLAIMED,
@@ -62,6 +67,11 @@ pub mod actions {
         BOARD_SETTINGS_CHANGED,
         BOARD_SETTINGS_REPLACED,
         BOARD_WORKFLOW_REPLACED,
+        WORKFLOW_PUBLISHED,
+        WORKFLOW_EDITED,
+        WORKFLOW_DELETED,
+        WORKFLOW_BOUND,
+        WORKFLOW_DETACHED,
         ISSUE_PROJECTED,
         ISSUE_CONTEXT_ADDED,
         WAKE_SET,

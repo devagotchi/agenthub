@@ -24,6 +24,7 @@ mod project;
 mod provenance;
 pub mod scan;
 mod settings;
+mod shared_workflow;
 mod ticket;
 pub mod wake;
 pub mod welcome;
@@ -38,6 +39,7 @@ pub use lease::{Lease, NextFilter};
 pub use project::*;
 pub use provenance::{TicketProvenance, TicketSource};
 pub use settings::{ConfigurationState, ProjectSettings, Settings, SettingsEdit};
+pub use shared_workflow::{SharedWorkflow, WorkflowBinding, WorkflowConfiguration};
 pub use ticket::{
     Actor, ChainStatus, Dep, DepKind, Event, EventFilter, Filter, NewTicket, Note, Patch, Ticket,
     TicketView, UNDO_MS,

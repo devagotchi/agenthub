@@ -25,6 +25,7 @@ mod notes;
 mod reads;
 pub mod registry;
 mod settings;
+mod shared_workflows;
 mod standing;
 mod tickets;
 
@@ -240,6 +241,11 @@ impl HostedBoard {
         connection: &mut AnyConnection,
         key: &str,
     ) -> DbResult<T> {
+        if key == "workflow"
+            && let Some(text) = self.shared_workflow_value(connection).await?
+        {
+            return Ok(decode(&text)?);
+        }
         let text: String = sqlx::query_scalar(
             "SELECT value FROM board_settings WHERE tenant_id=$1 AND board_id=$2 AND key=$3",
         )

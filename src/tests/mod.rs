@@ -118,6 +118,7 @@ mod lanes;
 mod operations;
 mod schema;
 mod search;
+mod shared_workflows;
 mod sources;
 mod standalone;
 mod standing;

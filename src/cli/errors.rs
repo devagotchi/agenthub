@@ -19,7 +19,8 @@ pub(super) fn exit_code_for(code: &str) -> u8 {
     match code {
         "stale_fence" | "version_conflict" | "held_by_other" | "lease_expired" | "not_holder"
         | "wip_limit" | "blocked" | "distinct_required" | "dependency_cycle" | "not_held"
-        | "source_conflict" | "parent_closed" | "request_conflict" => EXIT_CONFLICT,
+        | "source_conflict" | "parent_closed" | "request_conflict" | "already_exists"
+        | "in_use" | "shared_workflow" => EXIT_CONFLICT,
         "not_found" => EXIT_NOT_FOUND,
         "board_store" | "board_random" | "board_id" | "no_board" | "no_storage"
         | "board_runtime" | "board_io" | "hub_unreachable" | "hub_error" => EXIT_UNAVAILABLE,
@@ -47,6 +48,10 @@ pub(super) fn next_for(code: &str, id: Option<&str>) -> String {
         "version_conflict" => {
             format!("board show {id} --json and retry set with the current version")
         }
+        "shared_workflow" => "edit the shared workflow through its owner, or detach the board before editing its private workflow".into(),
+        "in_use" => "detach every board listed as using this workflow before deleting it".into(),
+        "already_exists" => "use the existing shared workflow or choose a different workflow id".into(),
+        "not_available" => "use an owner-scoped hub board for the shared workflow catalog".into(),
         "wip_limit" => "board done / handoff / release one of the tickets you hold first".into(),
         "source_conflict" => {
             "board show the ticket the message names and reconcile it with board set; never change the origin's path or item to get past it".into()
