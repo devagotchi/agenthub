@@ -25,7 +25,7 @@ pub const SCHEMA: &str = "devagotchi.notes/v1";
 pub const KEY: &str = "wakes";
 /// A recipient is called at most once in this long.
 pub const WINDOW: Duration = Duration::from_secs(60);
-const MAX_WAKES: usize = 20;
+pub(crate) const MAX_WAKES: usize = 20;
 /// The gaps before each retry of a POST that was refused.
 const RETRIES: [Duration; 2] = [Duration::from_secs(5), Duration::from_secs(30)];
 
@@ -260,29 +260,6 @@ impl Board {
         recipient: &str,
         url: Option<&str>,
     ) -> BridgeResult<Option<String>> {
-        let mut wakes = self.wakes()?;
-        let secret = url.map(|_| hex::encode(devagotchi_store::random::<32>()));
-        match (url, &secret) {
-            (Some(url), Some(secret)) => {
-                if !wakes.contains_key(recipient) && wakes.len() >= MAX_WAKES {
-                    return Err(invalid(format!(
-                        "a board holds at most {MAX_WAKES} webhooks"
-                    )));
-                }
-                wakes.insert(
-                    recipient.to_string(),
-                    Wake {
-                        url: url.to_string(),
-                        secret: secret.clone(),
-                    },
-                );
-            }
-            _ => {
-                wakes.remove(recipient);
-            }
-        }
-        let detail = serde_json::json!({ "recipient": recipient, "url": url });
-        self.hosted_call(self.hosted.save_wakes(actor, &wakes, detail))?;
-        Ok(secret)
+        self.hosted_call(self.hosted.set_wake(actor, recipient, url))
     }
 }

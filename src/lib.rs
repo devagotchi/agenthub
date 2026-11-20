@@ -31,7 +31,7 @@ pub mod workflow;
 
 pub use anchors::{AnchorPatch, Anchors};
 pub use board::{Board, Held, NoteToMe, PROTOCOL_LINE, Prime, Ready};
-pub use chain::{GENESIS, event_hash};
+pub use chain::{GENESIS, actions, event_hash};
 pub use checks::{fail, valid_name};
 pub use clock::{Clock, system_clock, utc};
 pub use lease::{Lease, NextFilter};
@@ -40,6 +40,7 @@ pub use provenance::{TicketProvenance, TicketSource};
 pub use settings::{ProjectSettings, Settings};
 pub use ticket::{
     Actor, ChainStatus, Dep, DepKind, Event, Filter, NewTicket, Note, Patch, Ticket, TicketView,
+    UNDO_MS,
 };
 pub use workflow::{StateKind, Workflow};
 

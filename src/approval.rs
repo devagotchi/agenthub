@@ -25,7 +25,7 @@ use devagotchi_contracts::BridgeResult;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Actor, Board, Filter, StateKind, Workflow, fail, invalid};
+use super::{Actor, Board, StateKind, Workflow, fail, invalid};
 use crate::valid_name;
 
 pub const KIND: &str = "approval";
@@ -33,10 +33,10 @@ pub const KIND: &str = "approval";
 /// The longest a person may approve a step ahead of time.
 pub const MAX_STANDING_DAYS: u32 = 90;
 /// Live standing authorizations a board holds at most.
-const MAX_LIVE: usize = 50;
+pub(crate) const MAX_LIVE: usize = 50;
 /// Approvals of one exact step, none denied, in 30 days before it is suggested.
 pub const SUGGEST_AFTER: usize = 3;
-const DAY_MS: i64 = 86_400_000;
+pub(crate) const DAY_MS: i64 = 86_400_000;
 
 /// One exact step a person approved ahead of time on one board.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -120,7 +120,7 @@ pub fn label_value(labels: &[String], key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn checked(field: &str, value: &str) -> BridgeResult<String> {
+pub(crate) fn checked(field: &str, value: &str) -> BridgeResult<String> {
     let value = value.trim();
     if valid_name(value) {
         Ok(value.to_string())
@@ -210,18 +210,16 @@ impl Board {
         why: &str,
         undo: &str,
     ) -> BridgeResult<ApprovalStatus> {
-        self.ask(
-            actor,
-            &Ask {
-                title,
-                what,
-                why,
-                undo,
-                kind: None,
-                target: None,
-            },
-        )
-        .map(|(status, _)| status)
+        let ask = Ask {
+            title,
+            what,
+            why,
+            undo,
+            kind: None,
+            target: None,
+        };
+        self.hosted_call(self.hosted.ask(actor, &ask))
+            .map(|(status, _)| status)
     }
 
     /// Ask for one approval. When a live standing authorization covers its kind and target,
@@ -231,70 +229,7 @@ impl Board {
         actor: &Actor<'_>,
         ask: &Ask<'_>,
     ) -> BridgeResult<(ApprovalStatus, Option<Standing>)> {
-        let kind = ask.kind.map(|kind| checked("kind", kind)).transpose()?;
-        let target = ask
-            .target
-            .map(|target| checked("target", target))
-            .transpose()?;
-        if target.is_some() && kind.is_none() {
-            return Err(invalid(
-                "a target goes with a kind: name the kind of step too",
-            ));
-        }
-        let mut labels = vec![KIND.to_string()];
-        labels.extend(kind.iter().map(|kind| format!("kind:{kind}")));
-        labels.extend(target.iter().map(|target| format!("target:{target}")));
-        let status = self.open_approval(actor, ask, &labels)?;
-        let Some(kind) = kind else {
-            return Ok((status, None));
-        };
-        let Some(what) = status.what().map(str::to_string) else {
-            return Ok((status, None));
-        };
-        let now = self.now();
-        let standing = self
-            .settings()?
-            .standing
-            .into_iter()
-            .find(|s| s.live(now) && s.covers(&kind, target.as_deref(), &what));
-        let Some(standing) = standing else {
-            return Ok((status, None));
-        };
-        let by = format!("standing:{}", standing.id);
-        let note = format!(
-            "Approved at once: {} approved {} ahead of time until {}.",
-            standing.granted_by,
-            match &standing.target {
-                Some(target) => format!("{} on {target}", standing.kind),
-                None => standing.kind.clone(),
-            },
-            crate::utc((standing.expires_at / 1000).max(0) as u64)
-        );
-        let decided = self.decide_approval(
-            &Actor {
-                id: &by,
-                human: true,
-                wip_limit: None,
-            },
-            &status.id,
-            status.version,
-            Verdict::Approved,
-            &note,
-        )?;
-        Ok((decided, Some(standing)))
-    }
-
-    fn open_approval(
-        &self,
-        actor: &Actor<'_>,
-        ask: &Ask<'_>,
-        labels: &[String],
-    ) -> BridgeResult<ApprovalStatus> {
-        let (title, what, why, undo) = (ask.title, ask.what, ask.why, ask.undo);
-        self.hosted_call(
-            self.hosted
-                .request_approval(actor, title, what, why, undo, labels),
-        )
+        self.hosted_call(self.hosted.ask(actor, ask))
     }
 
     /// A person approves or denies `id` as they saw it at `version`.
@@ -312,6 +247,18 @@ impl Board {
         )
     }
 
+    /// A person approves `id` and allows the same exact step ahead of time for `days`.
+    pub fn decide_and_allow(
+        &self,
+        actor: &Actor<'_>,
+        id: &str,
+        version: i64,
+        note: &str,
+        days: u32,
+    ) -> BridgeResult<(ApprovalStatus, Option<Standing>)> {
+        self.hosted_call(self.hosted.decide_and_allow(actor, id, version, note, days))
+    }
+
     pub fn approval_status(&self, id: &str) -> BridgeResult<ApprovalStatus> {
         self.hosted_call(self.hosted.approval_status(id))
     }
@@ -326,144 +273,28 @@ impl Board {
         what: &str,
         days: u32,
     ) -> BridgeResult<Standing> {
-        if !actor.human {
-            return Err(fail(
-                "humans_only",
-                "only a person approves a step ahead of time",
-            ));
-        }
-        let kind = checked("kind", kind)?;
-        let target = target.map(|t| checked("target", t)).transpose()?;
-        let what = text("what", what, 4000, true)?;
-        if !(1..=MAX_STANDING_DAYS).contains(&days) {
-            return Err(invalid(format!(
-                "approve ahead of time for 1 to {MAX_STANDING_DAYS} days"
-            )));
-        }
-        let now = self.now();
-        let standing = Standing {
-            id: format!("st-{}", hex::encode(devagotchi_store::random::<4>())),
-            kind,
-            target,
-            what,
-            granted_by: actor.id.to_string(),
-            granted_at: now,
-            expires_at: now + i64::from(days) * DAY_MS,
-            revoked_at: None,
-            revoked_by: None,
-        };
-        let made = standing.clone();
-        self.edit_settings(actor, "approval.standing_granted", move |settings| {
-            // What ended over 30 days ago is forgotten; the chain keeps it.
-            settings.standing.retain(|s| {
-                s.live(now) || now - s.revoked_at.unwrap_or(s.expires_at).min(s.expires_at) < 30 * DAY_MS
-            });
-            if settings.standing.iter().filter(|s| s.live(now)).count() >= MAX_LIVE {
-                return Err(fail(
-                    "too_many",
-                    format!("this board already approves {MAX_LIVE} steps ahead of time; revoke one first"),
-                ));
-            }
-            settings.standing.push(made.clone());
-            Ok(serde_json::json!({
-                "id": made.id, "kind": made.kind, "target": made.target, "what": made.what,
-                "expires_at": made.expires_at,
-            }))
-        })?;
-        Ok(standing)
+        self.hosted_call(self.hosted.grant_standing(actor, kind, target, what, days))
     }
 
     /// A person ends a standing authorization at once.
     pub fn revoke_standing(&self, actor: &Actor<'_>, id: &str) -> BridgeResult<Standing> {
-        if !actor.human {
-            return Err(fail(
-                "humans_only",
-                "only a person ends an approval given ahead of time",
-            ));
-        }
-        let now = self.now();
-        let who = actor.id.to_string();
-        let settings = self.edit_settings(actor, "approval.standing_revoked", |settings| {
-            let found = settings
-                .standing
-                .iter_mut()
-                .find(|s| s.id == id && s.live(now))
-                .ok_or_else(|| {
-                    fail(
-                        "not_found",
-                        format!("no live standing authorization {id} here"),
-                    )
-                })?;
-            found.revoked_at = Some(now);
-            found.revoked_by = Some(who.clone());
-            Ok(serde_json::json!({ "id": id, "kind": found.kind, "target": found.target }))
-        })?;
-        settings
-            .standing
-            .into_iter()
-            .find(|s| s.id == id)
-            .ok_or_else(|| fail("not_found", format!("no standing authorization {id} here")))
+        self.hosted_call(self.hosted.revoke_standing(actor, id))
     }
 
-    /// The board's standing authorizations, live first.
-    pub fn standing(&self) -> BridgeResult<Vec<Standing>> {
-        let now = self.now();
-        let mut all = self.settings()?.standing;
-        all.sort_by_key(|s| (!s.live(now), std::cmp::Reverse(s.granted_at)));
-        Ok(all)
+    /// A person ends every live standing authorization they granted for one of `kinds`.
+    pub fn revoke_own(&self, actor: &Actor<'_>, kinds: &[String]) -> BridgeResult<Vec<Standing>> {
+        self.hosted_call(self.hosted.revoke_own(actor, kinds))
+    }
+
+    /// The board's live standing authorizations, newest first.
+    pub fn live_standing(&self) -> BridgeResult<Vec<Standing>> {
+        self.hosted_call(self.hosted.live_standing())
     }
 
     /// Exact steps people approved at least `SUGGEST_AFTER` times in the last 30 days and
     /// never denied, that nothing approves ahead of time yet.
     pub fn suggestions(&self) -> BridgeResult<Vec<Suggestion>> {
-        let now = self.now();
-        let since = now - 30 * DAY_MS;
-        let workflow = self.workflow()?;
-        let approved = landing(&workflow, Verdict::Approved)?;
-        let denied = landing(&workflow, Verdict::Denied)?;
-        let live: Vec<Standing> = self
-            .settings()?
-            .standing
-            .into_iter()
-            .filter(|s| s.live(now))
-            .collect();
-        let asked = self.list(&Filter {
-            kind: Some(KIND.into()),
-            ..Filter::default()
-        })?;
-        let mut tally: std::collections::BTreeMap<
-            (String, Option<String>, String),
-            (usize, usize),
-        > = Default::default();
-        for ticket in asked.iter().filter(|t| t.created_at >= since) {
-            let Some(kind) = label_value(&ticket.labels, "kind:") else {
-                continue;
-            };
-            let target = label_value(&ticket.labels, "target:");
-            let Some((what, _, _)) = parts(&ticket.description) else {
-                continue;
-            };
-            let entry = tally.entry((kind, target, what.to_string())).or_default();
-            if ticket.state == approved {
-                entry.0 += 1;
-            } else if ticket.state == denied {
-                entry.1 += 1;
-            }
-        }
-        Ok(tally
-            .into_iter()
-            .filter(|((kind, target, what), (yes, no))| {
-                *no == 0
-                    && *yes >= SUGGEST_AFTER
-                    && !live.iter().any(|s| s.covers(kind, target.as_deref(), what))
-            })
-            .map(|((kind, target, what), (yes, _))| Suggestion {
-                kind,
-                target,
-                what,
-                approved: yes,
-            })
-            .collect())
+        self.hosted_call(self.hosted.suggestions())
     }
 
     /// Approvals waiting for a person, oldest first.

@@ -3,9 +3,9 @@
 //! `source_conflict` with nothing written, concurrent importers make one ticket, and the
 //! recorded provenance never changes.
 
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
-use super::{PROJECT, fixture, or_skip};
+use super::{PROJECT, fixture, or_skip, quiet};
 use crate::{Actor, Filter, LOCAL_TENANT, NewTicket, Patch, TicketSource};
 
 fn imported() -> NewTicket {
@@ -24,11 +24,6 @@ fn imported() -> NewTicket {
 }
 
 /// Nothing reaches the board change channel within a short wait.
-async fn quiet(listener: &mut sqlx::postgres::PgListener) -> bool {
-    tokio::time::timeout(Duration::from_millis(300), listener.recv())
-        .await
-        .is_err()
-}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_repeat_returns_the_ticket_as_it_is_and_changed_inputs_conflict() {

@@ -1,13 +1,17 @@
 //! A recipient's position on a hosted board (`agenthub::inbox`): one row of `board_settings`,
-//! read with the addressed notes and written in the same transaction.
+//! read with the addressed notes and written in the same transaction. Beside it, the board's
+//! webhooks (`agenthub::wake`), another row, read and changed in one transaction.
 
+use crate::chain::actions;
 use devagotchi_contracts::BridgeResult;
 use sqlx::AnyConnection;
 
 use super::{DbResult, HostedBoard, decode};
 use crate::{
-    Note,
+    Actor, Note,
     inbox::{self, Cursors, Delivery, InboxNote, KEY, SCAN},
+    invalid,
+    wake::{self, Wake, Wakes},
 };
 use devagotchi_store::transaction;
 
@@ -21,9 +25,8 @@ impl HostedBoard {
         .bind(KEY)
         .fetch_optional(&mut *connection)
         .await?;
-        Ok(raw
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default())
+        // A damaged row is refused, never read as empty and then overwritten (G4).
+        Ok(raw.map(|raw| decode(&raw)).transpose()?.unwrap_or_default())
     }
 
     async fn save_cursors(
@@ -113,52 +116,83 @@ impl HostedBoard {
         })
     }
 
-    pub async fn wakes(&self) -> BridgeResult<crate::wake::Wakes> {
+    pub async fn wakes(&self) -> BridgeResult<Wakes> {
         transaction!(&self.store, |connection| {
             self.scope(connection).await?;
-            let raw: Option<String> = sqlx::query_scalar(
-                "SELECT value FROM board_settings WHERE tenant_id=$1 AND board_id=$2 AND key=$3",
-            )
-            .bind(&self.tenant)
-            .bind(&self.project)
-            .bind(crate::wake::KEY)
-            .fetch_optional(&mut *connection)
-            .await?;
-            Ok(raw
-                .and_then(|raw| serde_json::from_str(&raw).ok())
-                .unwrap_or_default())
+            self.wakes_in(connection).await
         })
     }
 
-    pub async fn save_wakes(
+    async fn wakes_in(&self, connection: &mut AnyConnection) -> DbResult<Wakes> {
+        let raw: Option<String> = sqlx::query_scalar(
+            "SELECT value FROM board_settings WHERE tenant_id=$1 AND board_id=$2 AND key=$3",
+        )
+        .bind(&self.tenant)
+        .bind(&self.project)
+        .bind(wake::KEY)
+        .fetch_optional(&mut *connection)
+        .await?;
+        Ok(raw.map(|raw| decode(&raw)).transpose()?.unwrap_or_default())
+    }
+
+    /// Point `recipient` at `url`, or (no url) take its webhook away, in one transaction: the
+    /// read, the `MAX_WAKES` check, the write and `wake.set`. A new secret comes back once; it
+    /// is made before the transaction and never goes on the chain. Taking away a webhook the
+    /// recipient does not have writes nothing.
+    pub async fn set_wake(
         &self,
-        actor: &crate::Actor<'_>,
-        wakes: &crate::wake::Wakes,
-        detail: serde_json::Value,
-    ) -> BridgeResult<()> {
+        actor: &Actor<'_>,
+        recipient: &str,
+        url: Option<&str>,
+    ) -> BridgeResult<Option<String>> {
+        let secret = url.map(|_| hex::encode(devagotchi_store::random::<32>()));
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
+            let mut wakes = self.wakes_in(connection).await?;
+            match (url, &secret) {
+                (Some(url), Some(secret)) => {
+                    if !wakes.contains_key(recipient) && wakes.len() >= wake::MAX_WAKES {
+                        return Err(invalid(format!(
+                            "a board holds at most {} webhooks",
+                            wake::MAX_WAKES
+                        ))
+                        .into());
+                    }
+                    wakes.insert(
+                        recipient.to_string(),
+                        Wake {
+                            url: url.to_string(),
+                            secret: secret.clone(),
+                        },
+                    );
+                }
+                _ => {
+                    if wakes.remove(recipient).is_none() {
+                        return Ok(None);
+                    }
+                }
+            }
             sqlx::query(
                 "INSERT INTO board_settings (tenant_id,board_id,key,value) VALUES ($1,$2,$3,$4)
                  ON CONFLICT (tenant_id,board_id,key) DO UPDATE SET value=excluded.value",
             )
             .bind(&self.tenant)
             .bind(&self.project)
-            .bind(crate::wake::KEY)
-            .bind(serde_json::to_string(wakes).expect("wakes json"))
+            .bind(wake::KEY)
+            .bind(serde_json::to_string(&wakes).expect("wakes json"))
             .execute(&mut *connection)
             .await?;
             self.event(
                 connection,
                 actor.id,
                 now,
-                "notes.wake_set",
+                actions::WAKE_SET,
                 None,
                 None,
-                detail.clone(),
+                serde_json::json!({ "recipient": recipient, "url": url }),
             )
             .await?;
-            Ok(())
+            Ok(secret.clone())
         })
     }
 }

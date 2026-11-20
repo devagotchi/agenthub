@@ -91,13 +91,19 @@ pub struct DeliveryReceipt {
     pub issue: SourceIssue,
 }
 
+/// Which GitHub issue's shared context to read, a page at a time.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct IssueLookup {
+    /// The repository as the hub's GitHub mapping names it: `owner/name`.
     pub repository: String,
+    /// The issue's number in that repository.
     pub issue_number: u64,
+    /// Notes after this sequence number; 0 (the default) from the start. Pass the last
+    /// page's `next_after` to read on.
     #[serde(default)]
     pub after: i64,
+    /// Notes in one page, 1 to 100 (default 50).
     #[serde(default = "page_size")]
     pub limit: usize,
 }
@@ -111,28 +117,44 @@ fn page_size() -> usize {
 pub struct Advice {
     /// Stable within the request; identity is always the authenticated board actor.
     pub id: String,
+    /// Who made the model that advised (`anthropic`, `openai` …); at most 100 characters.
     #[serde(default)]
     pub model_provider: String,
+    /// The model's name; at most 100 characters.
     #[serde(default)]
     pub model_name: String,
+    /// What it recommends, 1 to 4000 characters.
     pub recommendation: String,
+    /// How sure, from 0 to 1.
     pub confidence: f64,
+    /// Where the evidence is (URLs, paths, commit ids): at most 20, each 1 to 1000 characters.
     #[serde(default)]
     pub evidence_refs: Vec<String>,
 }
 
+/// A checkpoint into one GitHub issue's shared context: where the work stands, what the next
+/// worker needs, and the advice behind it. At most 20000 bytes in all.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ContextWrite {
+    /// The repository as the hub's GitHub mapping names it: `owner/name`.
     pub repository: String,
+    /// The issue's number in that repository.
     pub issue_number: u64,
+    /// Yours, up to 128 of `[A-Za-z0-9._-]`: the same id and content again is the same
+    /// checkpoint; new content needs a new id.
     pub request_id: String,
+    /// The ticket's version as `board_issue_context` showed it.
     pub expected_version: i64,
+    /// Your fence, when you hold the ticket.
     #[serde(default)]
     pub fence: Option<i64>,
+    /// Where the work stands, 1 to 12000 bytes.
     pub state_summary: String,
+    /// What the next worker must know; at most 4000 bytes.
     #[serde(default)]
     pub handoff_note: String,
+    /// The advice behind the checkpoint, at most 25.
     #[serde(default)]
     pub decisions: Vec<Advice>,
 }

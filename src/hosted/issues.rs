@@ -1,4 +1,5 @@
 use super::*;
+use crate::chain::actions;
 use crate::issue_lifecycle::{
     ContextReceipt, ContextWrite, DeliveryReceipt, IssueContext, IssueWebhookEvent, SourceIssue,
     hash,
@@ -195,7 +196,7 @@ impl HostedBoard {
                     connection,
                     "github",
                     now,
-                    "issue.projected",
+                    actions::ISSUE_PROJECTED,
                     Some(&ticket.id),
                     None,
                     snapshot,
@@ -278,7 +279,7 @@ impl HostedBoard {
 
     pub async fn write_issue_context(
         &self,
-        actor: &str,
+        actor: &Actor<'_>,
         repository: u64,
         payload: &ContextWrite,
     ) -> BridgeResult<ContextReceipt> {
@@ -296,7 +297,7 @@ impl HostedBoard {
             )
             .bind(&self.tenant)
             .bind(&self.project)
-            .bind(actor)
+            .bind(actor.id)
             .bind(&payload.request_id)
             .fetch_optional(&mut *connection)
             .await?;
@@ -334,12 +335,12 @@ impl HostedBoard {
                 .into());
             }
             if ticket.holder.is_some() {
-                crate::lease::check_held(&ticket, actor, payload.fence)?;
+                crate::lease::check_held(&ticket, actor.id, payload.fence)?;
             }
             let note = self
                 .insert_note(
                     connection,
-                    actor,
+                    actor.id,
                     now,
                     &ticket.id,
                     "issue.context",
@@ -358,12 +359,12 @@ impl HostedBoard {
             .bind(now)
             .fetch_one(&mut *connection)
             .await?;
-            self.event(connection,actor,now,"issue.context_added",Some(&ticket.id),payload.fence,
+            self.event(connection,actor.id,now,actions::ISSUE_CONTEXT_ADDED,Some(&ticket.id),payload.fence,
                 serde_json::json!({"note_seq":note.seq,"request_id":payload.request_id,"revision":revision})).await?;
             sqlx::query(
                 "INSERT INTO board_context_receipts (tenant_id,board_id,actor,request_id,payload_hash,ticket,note_seq,revision)
                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-            ).bind(&self.tenant).bind(&self.project).bind(actor).bind(&payload.request_id).bind(&payload_hash)
+            ).bind(&self.tenant).bind(&self.project).bind(actor.id).bind(&payload.request_id).bind(&payload_hash)
                 .bind(&ticket.id).bind(note.seq).bind(revision).execute(&mut *connection).await?;
             Ok(ContextReceipt {
                 request_id: payload.request_id.clone(),

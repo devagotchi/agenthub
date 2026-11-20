@@ -5,9 +5,10 @@
 use devagotchi_contracts::BridgeResult;
 use tokio::sync::watch;
 
-use crate::{hosted, system_clock};
+use crate::hosted;
 
 mod deps;
+mod issues;
 mod prime;
 mod reads;
 mod settings;
@@ -81,11 +82,5 @@ impl Board {
 
     pub fn prefix(&self) -> &str {
         &self.prefix
-    }
-
-    /// Milliseconds since the epoch on this machine. Leases are reckoned in the database's
-    /// time; this is for what the caller decides itself (a standing approval's days).
-    pub fn now(&self) -> i64 {
-        system_clock()()
     }
 }

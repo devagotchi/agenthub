@@ -37,4 +37,28 @@ impl Board {
                 .add_note(actor, id, kind, body, to_principal, fence),
         )
     }
+
+    /// A person hands `id` to `to` with a note saying so, in one step.
+    pub fn delegate(
+        &self,
+        actor: &Actor<'_>,
+        id: &str,
+        version: i64,
+        to: &str,
+        note: &str,
+    ) -> BridgeResult<Ticket> {
+        self.hosted_call(self.hosted.delegate(actor, id, version, to, note))
+    }
+
+    /// Reopen a ticket closed moments ago (`UNDO_MS`), back to `from` when the workflow
+    /// allows it.
+    pub fn undo_close(
+        &self,
+        actor: &Actor<'_>,
+        id: &str,
+        version: i64,
+        from: &str,
+    ) -> BridgeResult<Ticket> {
+        self.hosted_call(self.hosted.undo_close(actor, id, version, from))
+    }
 }

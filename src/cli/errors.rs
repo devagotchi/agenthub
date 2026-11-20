@@ -19,7 +19,7 @@ pub(super) fn exit_code_for(code: &str) -> u8 {
     match code {
         "stale_fence" | "version_conflict" | "held_by_other" | "lease_expired" | "not_holder"
         | "wip_limit" | "blocked" | "distinct_required" | "dependency_cycle" | "not_held"
-        | "source_conflict" => EXIT_CONFLICT,
+        | "source_conflict" | "parent_closed" | "request_conflict" => EXIT_CONFLICT,
         "not_found" => EXIT_NOT_FOUND,
         "board_store" | "board_random" | "board_id" | "no_board" | "no_storage"
         | "board_runtime" | "board_io" | "hub_unreachable" | "hub_error" => EXIT_UNAVAILABLE,
@@ -73,6 +73,30 @@ pub(super) fn next_for(code: &str, id: Option<&str>) -> String {
         }
         "invalid_storage" => {
             "name the Postgres without a password: PGPASSWORD or ~/.pgpass holds it, or set DEVAGOTCHI_BOARD_STORAGE_URL".into()
+        }
+        "invalid" => "fix the argument the message names and run it again".into(),
+        "invalid_settings" => {
+            "board settings shows this board's settings; fix the value the message names".into()
+        }
+        "unknown_environment" => {
+            "board settings lists this board's environments: use one, or add it with board settings --env".into()
+        }
+        "parent_closed" => {
+            "board new without --parent, or reopen the parent with board set".into()
+        }
+        "dependency_cycle" => {
+            format!("board show {id} and the other ticket: one already depends on the other; board dep ... --remove the old link first")
+        }
+        "not_held" => format!("board show {id}: nobody holds it, so there is nothing to release"),
+        "approval_decide_only" => {
+            "an approval changes only by a person's decision on the hub's approvals page".into()
+        }
+        "request_conflict" => {
+            "retry with the same content, or use a new request id for new content".into()
+        }
+        "read_only" => "you are a viewer on this board; ask its owner for a member role".into(),
+        "board_damaged" => {
+            "the board's stored data is damaged; tell whoever runs its Postgres (board verify shows the chain)".into()
         }
         "usage" => "board --help".into(),
         _ => "board --help".into(),

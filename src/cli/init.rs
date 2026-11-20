@@ -63,7 +63,7 @@ pub(super) fn init(parsed: &Parsed, invocation: &Invocation, output: &mut Output
         created_at: existing
             .as_ref()
             .map(|c| c.created_at)
-            .unwrap_or_else(|| board.now()),
+            .unwrap_or_else(|| crate::system_clock()()),
         hub: existing.and_then(|c| c.hub),
         storage,
     };

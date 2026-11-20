@@ -13,21 +13,6 @@ impl Board {
         self.hosted_call(self.hosted.workflow())
     }
 
-    /// Change the settings in one transaction: `edit` sees them as they are now and says
-    /// what it changed, which lands on the chain as `action`. Never a stale overwrite of a
-    /// change made meanwhile, as replacing them whole (`put_settings`) could be.
-    pub fn edit_settings<F>(
-        &self,
-        actor: &Actor<'_>,
-        action: &str,
-        edit: F,
-    ) -> BridgeResult<Settings>
-    where
-        F: Fn(&mut Settings) -> BridgeResult<serde_json::Value>,
-    {
-        self.hosted_call(self.hosted.edit_settings(actor, action, &edit))
-    }
-
     /// Replace the settings. Validated before it lands; recorded as an admin event.
     /// Admin verbs: the operator's `board settings` / `board workflow` commands and the
     /// web board (increment 10) call these; until then only the tests do.
@@ -52,12 +37,5 @@ impl Board {
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn put_workflow(&self, actor: &Actor<'_>, workflow: &Workflow) -> BridgeResult<()> {
         self.hosted_call(self.hosted.put_workflow(actor, workflow))
-    }
-
-    pub fn issue_source(
-        &self,
-        id: &str,
-    ) -> BridgeResult<Option<crate::issue_lifecycle::SourceIssue>> {
-        self.hosted_call(self.hosted.issue_source(id))
     }
 }

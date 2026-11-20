@@ -80,6 +80,10 @@ pub struct Dep {
     pub kind: DepKind,
 }
 
+/// How long after closing a ticket a person may undo it (`HostedBoard::undo_close`), on
+/// the database's clock; a page may count it down on its own.
+pub const UNDO_MS: i64 = 10_000;
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Ticket {
     pub id: String,

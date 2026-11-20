@@ -240,3 +240,104 @@ async fn anchors_are_flags_on_new_set_and_ls_and_in_the_json() {
     })
     .await;
 }
+
+/// Store codes no command can act on: runtime plumbing, or reached only by a hub page or
+/// the webhook route.
+const INTERNAL: &[&str] = &[
+    "runtime",
+    "board_random",
+    "board_id",
+    "board_runtime",
+    "delivery_conflict",
+    "unsupported_action",
+    "wake_failed",
+    "no_done_state",
+    "too_many",
+    "undo_too_late",
+    // The CLI has no approval verbs (`Face` has none), so these never reach it.
+    "not_an_approval",
+    "approval_changed",
+    "already_decided",
+];
+
+/// Every refusal code in the files where the store decides.
+fn store_codes() -> std::collections::BTreeSet<String> {
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files: Vec<_> = [
+        "approval.rs",
+        "lease.rs",
+        "wake.rs",
+        "issue_lifecycle.rs",
+        "settings.rs",
+        "workflow.rs",
+        "checks.rs",
+        "lib.rs",
+    ]
+    .iter()
+    .map(|f| src.join(f))
+    .collect();
+    for dir in ["hosted", "board"] {
+        for entry in std::fs::read_dir(src.join(dir)).unwrap() {
+            files.push(entry.unwrap().path());
+        }
+    }
+    let mut codes = std::collections::BTreeSet::new();
+    for path in files {
+        let flat: String = std::fs::read_to_string(&path)
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        for marker in ["fail(\"", "BridgeError::new(\""] {
+            for piece in flat.split(marker).skip(1) {
+                codes.insert(piece.split('"').next().unwrap().to_string());
+            }
+        }
+    }
+    codes
+}
+
+#[test]
+fn every_code_a_command_can_reach_names_its_next_step() {
+    let mut codes = store_codes();
+    assert!(codes.len() > 20, "the scan found {} codes", codes.len());
+    // `invalid()` builds `invalid`; the hub refuses a viewer with `read_only`; the rest are
+    // the command line's own.
+    for code in [
+        "invalid",
+        "read_only",
+        "no_storage",
+        "invalid_storage",
+        "not_signed_in",
+        "hub_unreachable",
+    ] {
+        codes.insert(code.to_string());
+    }
+    let fallback = crate::cli::errors::next_for("zz_never_a_code", None);
+    let missing: Vec<&String> = codes
+        .iter()
+        .filter(|code| !INTERNAL.contains(&code.as_str()))
+        .filter(|code| crate::cli::errors::next_for(code, Some("x")) == fallback)
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "no next of its own in cli/errors.rs: {missing:?}"
+    );
+}
+
+#[test]
+fn a_refusal_against_the_boards_state_is_a_conflict() {
+    for code in [
+        "parent_closed",
+        "request_conflict",
+        "dependency_cycle",
+        "not_held",
+        "source_conflict",
+        "version_conflict",
+    ] {
+        assert_eq!(
+            crate::cli::errors::exit_code_for(code),
+            EXIT_CONFLICT,
+            "{code}"
+        );
+    }
+}

@@ -17,7 +17,7 @@ use super::{
 pub const ME: &str = "@me";
 
 pub trait Face {
-    /// Milliseconds since the epoch, as this face reckons time.
+    /// Milliseconds since the epoch, as this face reckons time: for display, never a decision.
     fn now(&self) -> i64;
     fn prefix(&self) -> String;
     /// Where this board lives, for messages: `here` or the hub's URL.
@@ -104,7 +104,8 @@ pub trait Face {
 
 impl Face for Board {
     fn now(&self) -> i64 {
-        Board::now(self)
+        // Display only ("12m left"): the board decides on the database's clock.
+        crate::system_clock()()
     }
 
     fn prefix(&self) -> String {

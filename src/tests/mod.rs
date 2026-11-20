@@ -29,8 +29,9 @@ pub(crate) async fn fixture() -> Option<Fixture> {
 }
 
 impl Fixture {
-    /// Let `ms` pass for what the board keeps time on: every lease lapses `ms` sooner, and
-    /// every standing authorization was granted, ends and was revoked `ms` earlier. The board
+    /// Let `ms` pass for what the board keeps time on: every lease lapses `ms` sooner, every
+    /// closed ticket closed `ms` earlier, and every standing authorization was granted, ends
+    /// and was revoked `ms` earlier. The board
     /// reads Postgres's clock, so the rows move instead of the clock; nothing lands on the
     /// chain.
     pub(crate) fn advance(&self, ms: i64) {
@@ -43,6 +44,15 @@ impl Fixture {
                     sqlx::query(
                         "UPDATE board_tickets SET lease_expires_at=lease_expires_at-$3
                          WHERE tenant_id=$1 AND board_id=$2 AND lease_expires_at IS NOT NULL",
+                    )
+                    .bind(LOCAL_TENANT)
+                    .bind(PROJECT)
+                    .bind(ms)
+                    .execute(&mut *connection)
+                    .await?;
+                    sqlx::query(
+                        "UPDATE board_tickets SET closed_at=closed_at-$3
+                         WHERE tenant_id=$1 AND board_id=$2 AND closed_at IS NOT NULL",
                     )
                     .bind(LOCAL_TENANT)
                     .bind(PROJECT)
@@ -95,12 +105,14 @@ impl Fixture {
     }
 }
 
+mod actions;
 mod anchors;
 mod approvals;
 mod hosted;
 mod hosted_lifecycle;
 mod inbox;
 mod lanes;
+mod operations;
 mod schema;
 mod sources;
 mod standalone;
@@ -112,9 +124,12 @@ pub(super) async fn postgres() -> Option<devagotchi_store::testing::TestStore> {
     devagotchi_store::testing::postgres_with(&[&crate::migrations::MIGRATIONS]).await
 }
 
-/// The stores a test runs on: [`postgres`], or none.
-pub(super) async fn stores() -> Vec<devagotchi_store::testing::TestStore> {
-    postgres().await.into_iter().collect()
+/// True when nothing reaches `listener` within 300 ms: a request that changed nothing
+/// announced nothing (rule 6).
+pub(super) async fn quiet(listener: &mut sqlx::postgres::PgListener) -> bool {
+    tokio::time::timeout(std::time::Duration::from_millis(300), listener.recv())
+        .await
+        .is_err()
 }
 
 /// The board change channel a hosted board notifies, heard on `url`.

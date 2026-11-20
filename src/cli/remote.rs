@@ -36,6 +36,18 @@ struct ClaimOut {
     lease: Option<Lease>,
 }
 
+/// `board_list` and `board_ready` answer an object holding the list (MCP `structuredContent`).
+#[derive(Deserialize)]
+struct TicketsOut {
+    tickets: Vec<Ticket>,
+}
+
+/// `board_dep` answers the dependencies inside an object.
+#[derive(Deserialize)]
+struct DepsOut {
+    deps: Vec<Dep>,
+}
+
 impl Remote {
     pub fn new(client: Box<dyn Session>, project: &str, prefix: &str) -> Self {
         Self {
@@ -78,7 +90,8 @@ impl Face for Remote {
     }
 
     fn ready(&self, _actor: &Actor<'_>, limit: usize) -> BridgeResult<Vec<Ticket>> {
-        self.call("board_ready", json!({ "limit": limit }))
+        let out: TicketsOut = self.call("board_ready", json!({ "limit": limit }))?;
+        Ok(out.tickets)
     }
 
     fn list(&self, _actor: &Actor<'_>, filter: &Filter) -> BridgeResult<Vec<Ticket>> {
@@ -88,7 +101,7 @@ impl Face for Remote {
                 "the ready filter is `board ready` on a hosted board",
             ));
         }
-        self.call(
+        let out: TicketsOut = self.call(
             "board_list",
             json!({
                 "state": filter.state,
@@ -107,7 +120,8 @@ impl Face for Remote {
                 "fingerprint": filter.anchors.fingerprint,
                 "limit": filter.limit,
             }),
-        )
+        )?;
+        Ok(out.tickets)
     }
 
     fn get(&self, id: &str) -> BridgeResult<TicketView> {
@@ -271,10 +285,11 @@ impl Face for Remote {
         depends_on: &str,
         kind: DepKind,
     ) -> BridgeResult<Vec<Dep>> {
-        self.call(
+        let out: DepsOut = self.call(
             "board_dep",
             json!({ "id": id, "depends_on": depends_on, "kind": kind.as_str(), "remove": false }),
-        )
+        )?;
+        Ok(out.deps)
     }
 
     fn remove_dep(
@@ -284,10 +299,11 @@ impl Face for Remote {
         depends_on: &str,
         kind: DepKind,
     ) -> BridgeResult<Vec<Dep>> {
-        self.call(
+        let out: DepsOut = self.call(
             "board_dep",
             json!({ "id": id, "depends_on": depends_on, "kind": kind.as_str(), "remove": true }),
-        )
+        )?;
+        Ok(out.deps)
     }
 
     fn reap(&self) -> BridgeResult<usize> {

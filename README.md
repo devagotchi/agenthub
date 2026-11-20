@@ -14,7 +14,7 @@ Every board is in Postgres, either:
 - **hosted**: one board per project of an account or organisation on a hub, its tenant held
   apart by row-level security, its events exported to ClickHouse when there is one.
 
-Both run the same code (`src/hosted*`); a standalone board is the hosted board under the local
+Both run the same code (`src/hosted/`); a standalone board is the hosted board under the local
 tenant. There was a SQLite standalone board before; nothing moves from a `board.sqlite3` (this is
 pre-release, and there is no importer): `board init` makes a new, empty board.
 
@@ -46,11 +46,15 @@ the scope the host sets (`devagotchi.tenant`); AgentHub keeps no table of tenant
 
 ## Layout
 
-`src/hosted*` is the board in Postgres; `src/board/` and the protocol modules (`lease.rs`,
-`approval.rs`, `inbox.rs` …) its synchronous face; `src/project.rs` the standalone board a project
-opens; `src/cli/` the command line; `migrations/` the Postgres tables; `src/tests/` the
-protocol's tests, by topic.
-The rules are Devagotchi's (`.ai/patterns/layout.md` there).
+`src/hosted/` is the board in Postgres, one file per subject (`tickets`, `leases`, `notes`,
+`graph`, `approvals`, `settings`, `inbox`, `issues`, `reads`, and `registry` for what a host asks
+about all the boards in a tenant): every operation there is one transaction, one event per
+action on the hash chain, named by a constant in `chain::actions`. `src/board/` and the protocol
+modules (`lease.rs`, `approval.rs`, `inbox.rs` …) are its synchronous face, each method one call
+into `hosted`; `src/project.rs` the standalone board a project opens; `src/cli/` the command
+line; `migrations/` the Postgres tables; `src/tests/` the protocol's tests, by topic.
+The rules are Devagotchi's: `.ai/patterns/board-operations.md` and `.ai/patterns/layout.md`
+there.
 
 ## License
 

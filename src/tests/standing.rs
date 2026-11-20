@@ -105,7 +105,7 @@ pub(crate) fn standing_approvals_hold(board: &Board, advance: Option<&dyn Fn(i64
 
     // Elsewhere, for another kind, or with no target: still a person's.
     for (kind, target) in [
-        ("restart", Some("platinum")),
+        ("restart", Some("lab")),
         ("deploy", Some("dabo")),
         ("restart", None),
     ] {
@@ -188,7 +188,7 @@ pub(crate) fn standing_approvals_hold(board: &Board, advance: Option<&dyn Fn(i64
     let (untargeted, _) = board.ask(&agent, &ask(Some("restart"), None)).unwrap();
     assert_eq!(untargeted.status, "approved");
     let (aimed, _) = board
-        .ask(&agent, &ask(Some("restart"), Some("platinum")))
+        .ask(&agent, &ask(Some("restart"), Some("lab")))
         .unwrap();
     assert_eq!(aimed.status, "pending", "no target is not every target");
     match advance {
@@ -196,13 +196,7 @@ pub(crate) fn standing_approvals_hold(board: &Board, advance: Option<&dyn Fn(i64
             advance(DAY + 1);
             let (lapsed, _) = board.ask(&agent, &ask(Some("restart"), None)).unwrap();
             assert_eq!(lapsed.status, "pending");
-            assert!(
-                board
-                    .standing()
-                    .unwrap()
-                    .iter()
-                    .all(|s| !s.live(board.now()))
-            );
+            assert!(board.live_standing().unwrap().is_empty());
         }
         None => {
             board.revoke_standing(&person, &bare.id).unwrap();

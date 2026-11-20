@@ -1,10 +1,50 @@
-//! Making a ticket and reading it whole: create (with its import source, once per board) and
-//! the full view with its dependencies, children, notes and provenance.
+//! Making and changing a ticket: the welcome ticket, create (with its import source, once
+//! per board), update, delegate and undo-close. Reading one whole is `reads.rs`.
 
 use super::*;
-use crate::{TicketProvenance, TicketSource, provenance::request_digest};
+use crate::chain::actions;
+use crate::{Patch, TicketProvenance, TicketSource, provenance::request_digest};
 
 impl HostedBoard {
+    pub async fn welcome_if_new(
+        &self,
+        actor: &Actor<'_>,
+        title: &str,
+        steps: &str,
+    ) -> BridgeResult<Option<String>> {
+        transaction!(&self.store, |connection| {
+            let now = self.scope(connection).await?;
+            let count: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM board_tickets WHERE tenant_id=$1 AND board_id=$2",
+            )
+            .bind(&self.tenant)
+            .bind(&self.project)
+            .fetch_one(&mut *connection)
+            .await?;
+            if count > 0 {
+                return Ok(None);
+            }
+            let workflow: Workflow = self.configuration(connection, "workflow").await?;
+            let id = self.fresh_id(connection).await?;
+            sqlx::query(
+                "INSERT INTO board_tickets (tenant_id,board_id,id,kind,title,description,state,priority,labels,created_by,created_at,updated_at)
+                 VALUES ($1,$2,$3,'task',$4,$5,$6,1,'[\"getting-started\"]',$7,$8,$8)",
+            ).bind(&self.tenant).bind(&self.project).bind(&id).bind(title).bind(steps)
+                .bind(&workflow.attention_state).bind(actor.id).bind(now).execute(&mut *connection).await?;
+            self.event(
+                connection,
+                actor.id,
+                now,
+                actions::BOARD_WELCOMED,
+                Some(&id),
+                None,
+                serde_json::json!({"title":title}),
+            )
+            .await?;
+            Ok(Some(id))
+        })
+    }
+
     pub async fn create(&self, actor: &Actor<'_>, new: &NewTicket) -> BridgeResult<Ticket> {
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
@@ -59,6 +99,9 @@ impl HostedBoard {
         };
         let settings: Settings = self.configuration(connection, "settings").await?;
         check_environment(&settings, environment.as_deref())?;
+        // No repo given: the board's, so every face that creates gets it (rule 1). Anchors
+        // are not part of `request_sha256`, so a sourced repeat is unaffected.
+        let repo = clean_anchor(&new.anchors.repo).or_else(|| settings.repo.clone());
         let id = if let Some(parent) = &new.parent {
             let parent_ticket = self.ticket(connection, parent, &workflow, now).await?;
             if workflow.is_done(&parent_ticket.state) {
@@ -90,7 +133,7 @@ impl HostedBoard {
                 .bind(new.priority.unwrap_or(settings.default_priority))
                 .bind(serde_json::to_string(&labels).expect("labels json"))
                 .bind(&new.parent).bind(&new.assignee).bind(actor.id).bind(now)
-                .bind(clean_anchor(&new.anchors.machine)).bind(clean_anchor(&new.anchors.repo))
+                .bind(clean_anchor(&new.anchors.machine)).bind(&repo)
                 .bind(environment).bind(clean_anchor(&new.anchors.agent))
                 .bind(clean_anchor(&new.anchors.session)).bind(fingerprint)
                 .bind(occurrences).bind(new.last_seen_at).execute(&mut *connection).await?;
@@ -137,7 +180,7 @@ impl HostedBoard {
             connection,
             actor.id,
             now,
-            "ticket.created",
+            actions::TICKET_CREATED,
             Some(&id),
             None,
             data,
@@ -179,60 +222,245 @@ impl HostedBoard {
         Ok(Some(id))
     }
 
-    async fn provenance(
+    pub async fn update(
         &self,
-        connection: &mut AnyConnection,
+        actor: &Actor<'_>,
         id: &str,
-    ) -> DbResult<Option<TicketProvenance>> {
-        let row = sqlx::query(
-            "SELECT path,item,revision,content_sha256,recorded_by,recorded_at,request_sha256
-             FROM board_sources WHERE tenant_id=$1 AND board_id=$2 AND ticket=$3",
-        )
-        .bind(&self.tenant)
-        .bind(&self.project)
-        .bind(id)
-        .fetch_optional(&mut *connection)
-        .await?;
-        let Some(row) = row else { return Ok(None) };
-        Ok(Some(TicketProvenance {
-            source: TicketSource {
-                path: row.try_get("path")?,
-                item: row.try_get("item")?,
-                revision: row.try_get("revision")?,
-                content_sha256: row.try_get("content_sha256")?,
-            },
-            recorded_by: row.try_get("recorded_by")?,
-            recorded_at: row.try_get("recorded_at")?,
-            request_sha256: row.try_get("request_sha256")?,
-        }))
-    }
-
-    pub async fn view(&self, id: &str) -> BridgeResult<crate::TicketView> {
+        version: i64,
+        patch: &Patch,
+    ) -> BridgeResult<Ticket> {
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
-            let workflow = self.configuration(connection, "workflow").await?;
-            let ticket = self.ticket(connection, id, &workflow, now).await?;
-            let deps = self.deps(connection, id, false).await?;
-            let dependents = self.deps(connection, id, true).await?;
-            let children=sqlx::query_scalar(
-                "SELECT id FROM board_tickets WHERE tenant_id=$1 AND board_id=$2 AND parent=$3 ORDER BY created_at,id COLLATE \"C\"",
-            ).bind(&self.tenant).bind(&self.project).bind(id).fetch_all(&mut *connection).await?;
-            let texts:Vec<String>=sqlx::query_scalar(
-                "SELECT row_to_json(n)::text FROM board_notes n WHERE tenant_id=$1 AND board_id=$2 AND ticket=$3 ORDER BY seq",
-            ).bind(&self.tenant).bind(&self.project).bind(id).fetch_all(&mut *connection).await?;
-            let notes = texts
-                .iter()
-                .map(|text| decode(text))
-                .collect::<BridgeResult<Vec<Note>>>()?;
-            let provenance = self.provenance(connection, id).await?;
-            Ok(crate::TicketView {
-                ticket,
-                deps,
-                dependents,
-                children,
-                notes,
-                provenance,
-            })
+            let workflow: Workflow = self.configuration(connection, "workflow").await?;
+            let current = self.ticket(connection, id, &workflow, now).await?;
+            unheld_edit(&current, version)?;
+            let mut changed = serde_json::Map::new();
+            let mut ticket = current.clone();
+            if let Some(title) = &patch.title {
+                let title = title.trim();
+                if title.is_empty() || title.chars().count() > 300 {
+                    return Err(invalid("title must be 1 to 300 characters").into());
+                }
+                ticket.title = title.into();
+                changed.insert("title".into(), serde_json::json!(title));
+            }
+            if let Some(description) = &patch.description {
+                ticket.description = description.clone();
+                changed.insert("description".into(), true.into());
+            }
+            if let Some(priority) = patch.priority {
+                ticket.priority = priority;
+                changed.insert("priority".into(), priority.into());
+            }
+            if let Some(labels) = &patch.labels {
+                ticket.labels = clean_labels(labels);
+                changed.insert("labels".into(), serde_json::json!(ticket.labels));
+            }
+            if let Some(assignee) = &patch.assignee {
+                ticket.assignee = assignee.clone();
+                changed.insert("assignee".into(), serde_json::json!(assignee));
+            }
+            for (column, value) in patch.anchors.columns() {
+                if let Some(value) = value {
+                    let value = clean_anchor(value);
+                    if column == "environment" {
+                        let settings: Settings = self.configuration(connection, "settings").await?;
+                        check_environment(&settings, value.as_deref())?;
+                    }
+                    match column {
+                        "machine" => ticket.machine = value.clone(),
+                        "repo" => ticket.repo = value.clone(),
+                        "environment" => ticket.environment = value.clone(),
+                        "agent" => ticket.agent = value.clone(),
+                        "session" => ticket.session = value.clone(),
+                        "fingerprint" => ticket.fingerprint = value.clone(),
+                        _ => unreachable!("fixed anchor columns"),
+                    }
+                    changed.insert(column.into(), serde_json::json!(value));
+                }
+            }
+            if let Some(occurrences) = patch.occurrences {
+                if occurrences < 1 {
+                    return Err(invalid("occurrences must be at least 1").into());
+                }
+                ticket.occurrences = occurrences;
+                changed.insert("occurrences".into(), occurrences.into());
+            }
+            if let Some(last_seen_at) = patch.last_seen_at {
+                ticket.last_seen_at = last_seen_at;
+                changed.insert("last_seen_at".into(), serde_json::json!(last_seen_at));
+            }
+            if let Some(to) = patch.state.as_ref().filter(|to| *to != &current.state) {
+                crate::check_transition(&workflow, &current, to, actor.id)?;
+                ticket.state = to.clone();
+                ticket.closed_at = workflow.is_done(to).then_some(now);
+                changed.insert("from".into(), serde_json::json!(current.state));
+                changed.insert("to".into(), serde_json::json!(to));
+            }
+            if changed.is_empty() {
+                return Ok(current);
+            }
+            sqlx::query(
+                "UPDATE board_tickets SET title=$4,description=$5,priority=$6,labels=$7,assignee=$8,
+                 machine=$9,repo=$10,environment=$11,agent=$12,session=$13,fingerprint=$14,occurrences=$15,
+                 last_seen_at=$16,state=$17,closed_at=$18,version=version+1,updated_at=$19
+                 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
+            ).bind(&self.tenant).bind(&self.project).bind(id).bind(&ticket.title).bind(&ticket.description)
+                .bind(ticket.priority).bind(serde_json::to_string(&ticket.labels).expect("labels json"))
+                .bind(&ticket.assignee).bind(&ticket.machine).bind(&ticket.repo).bind(&ticket.environment)
+                .bind(&ticket.agent).bind(&ticket.session).bind(&ticket.fingerprint).bind(ticket.occurrences)
+                .bind(ticket.last_seen_at).bind(&ticket.state).bind(ticket.closed_at).bind(now)
+                .execute(&mut *connection).await?;
+            self.event(
+                connection,
+                actor.id,
+                now,
+                actions::TICKET_UPDATED,
+                Some(id),
+                None,
+                changed.into(),
+            )
+            .await?;
+            self.ticket(connection, id, &workflow, now).await
         })
     }
+    /// A person hands `id` to `to` with a note saying so, as they saw it at `version`: the
+    /// assignee and the note in one transaction, one `ticket.updated` naming both.
+    pub async fn delegate(
+        &self,
+        actor: &Actor<'_>,
+        id: &str,
+        version: i64,
+        to: &str,
+        note: &str,
+    ) -> BridgeResult<Ticket> {
+        let to = to.trim();
+        if !crate::valid_name(to) {
+            return Err(invalid(format!(
+                "{to:?} is not a name to hand a ticket to: [a-z0-9][a-z0-9-]{{0,62}}"
+            )));
+        }
+        let note = note.trim();
+        if note.is_empty() || note.chars().count() > 20_000 {
+            return Err(invalid("note body must be 1 to 20000 characters"));
+        }
+        transaction!(&self.store, |connection| {
+            let now = self.scope(connection).await?;
+            let workflow: Workflow = self.configuration(connection, "workflow").await?;
+            let current = self.ticket(connection, id, &workflow, now).await?;
+            unheld_edit(&current, version)?;
+            sqlx::query(
+                "UPDATE board_tickets SET assignee=$4,version=version+1,updated_at=$5
+                 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
+            )
+            .bind(&self.tenant)
+            .bind(&self.project)
+            .bind(id)
+            .bind(to)
+            .bind(now)
+            .execute(&mut *connection)
+            .await?;
+            let note = self
+                .insert_note(connection, actor.id, now, id, "note", note, Some(to), None)
+                .await?;
+            self.event(
+                connection,
+                actor.id,
+                now,
+                actions::TICKET_UPDATED,
+                Some(id),
+                None,
+                serde_json::json!({"assignee": to, "note_seq": note.seq}),
+            )
+            .await?;
+            self.ticket(connection, id, &workflow, now).await
+        })
+    }
+
+    /// Reopen a ticket closed less than `UNDO_MS` ago by the database's clock: back to
+    /// `from` when the workflow goes there, else to its initial state. `undo_too_late` once
+    /// the window has passed; `transition_not_allowed` when the workflow has neither way back.
+    pub async fn undo_close(
+        &self,
+        actor: &Actor<'_>,
+        id: &str,
+        version: i64,
+        from: &str,
+    ) -> BridgeResult<Ticket> {
+        transaction!(&self.store, |connection| {
+            let now = self.scope(connection).await?;
+            let workflow: Workflow = self.configuration(connection, "workflow").await?;
+            let current = self.ticket(connection, id, &workflow, now).await?;
+            if current
+                .closed_at
+                .is_none_or(|closed| now >= closed + crate::UNDO_MS)
+            {
+                return Err(fail(
+                    "undo_too_late",
+                    format!("{id} was closed more than {}s ago", crate::UNDO_MS / 1000),
+                )
+                .into());
+            }
+            unheld_edit(&current, version)?;
+            let to = if workflow.allows(&current.state, from) {
+                from.to_string()
+            } else {
+                workflow.initial_state.clone()
+            };
+            if !workflow.allows(&current.state, &to) {
+                return Err(fail(
+                    "transition_not_allowed",
+                    format!(
+                        "this board's workflow ({}) has no transition {} -> {}; add {{\"from\": \"{}\", \"to\": \"{}\"}} to its transitions to undo here",
+                        workflow.id, current.state, to, current.state, to
+                    ),
+                )
+                .into());
+            }
+            crate::check_transition(&workflow, &current, &to, actor.id)?;
+            sqlx::query(
+                "UPDATE board_tickets SET state=$4,closed_at=NULL,version=version+1,updated_at=$5
+                 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
+            )
+            .bind(&self.tenant)
+            .bind(&self.project)
+            .bind(id)
+            .bind(&to)
+            .bind(now)
+            .execute(&mut *connection)
+            .await?;
+            self.event(
+                connection,
+                actor.id,
+                now,
+                actions::TICKET_UPDATED,
+                Some(id),
+                None,
+                serde_json::json!({"from": current.state, "to": to, "undo": true}),
+            )
+            .await?;
+            self.ticket(connection, id, &workflow, now).await
+        })
+    }
+}
+
+/// An edit to a ticket nobody needs to hold: refused for an approval (only a decision moves
+/// it) and when `version` is not current.
+fn unheld_edit(current: &Ticket, version: i64) -> BridgeResult<()> {
+    if current.kind == crate::approval::KIND {
+        return Err(fail(
+            "approval_decide_only",
+            "an approval changes only through a person's decision",
+        ));
+    }
+    if current.version != version {
+        return Err(fail(
+            "version_conflict",
+            format!(
+                "version {version} is not current ({}); re-read and retry",
+                current.version
+            ),
+        ));
+    }
+    Ok(())
 }
