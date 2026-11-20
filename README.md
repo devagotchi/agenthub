@@ -54,6 +54,22 @@ versions meeting the other's. A host runs its own migrations first, then AgentHu
 `Store::open(url, &[&host, &devagotchi_agenthub::migrations::MIGRATIONS])`. A board's tenant is
 the scope the host sets (`devagotchi.tenant`); AgentHub keeps no table of tenants.
 
+## Shared workflows
+
+Shared workflows are an explicit choice within a board owner's namespace. The host must
+authorize that whole namespace before calling `shared_workflows`, `publish_workflow`,
+`edit_shared_workflow`, `bind_workflow`, `detach_workflow` or `delete_shared_workflow`;
+a grant to configure one shared project does not authorize editing other projects.
+`workflow_configuration` reads the board's effective configuration and binding together.
+Publishing creates a definition and binds its source board. A shared edit validates all
+using boards and advances their versions atomically. Detaching preserves the current
+definition as an independent copy; deletion refuses while any board uses it. Direct
+per-board workflow setters refuse bound definitions. Catalog history stays on the
+publishing board's existing chain and outbox; affected boards record their own changes.
+These library methods require a human actor; browser/CLI catalog surfaces are separate
+host integrations, not supplied by this backend change. Existing standalone board
+configuration remains available; catalog sharing requires an owner-scoped board.
+
 ## Layout
 
 `src/hosted/` is the board in Postgres, one file per subject (`tickets`, `leases`, `notes`,

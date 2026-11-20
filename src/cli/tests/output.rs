@@ -276,10 +276,18 @@ fn store_codes() -> std::collections::BTreeSet<String> {
     .iter()
     .map(|f| src.join(f))
     .collect();
-    for dir in ["hosted", "board"] {
-        for entry in std::fs::read_dir(src.join(dir)).unwrap() {
-            files.push(entry.unwrap().path());
+    fn collect(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                collect(&path, files);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                files.push(path);
+            }
         }
+    }
+    for dir in ["hosted", "board"] {
+        collect(&src.join(dir), &mut files);
     }
     let mut codes = std::collections::BTreeSet::new();
     for path in files {

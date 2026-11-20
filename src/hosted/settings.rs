@@ -155,10 +155,39 @@ impl HostedBoard {
         now: i64,
         workflow: &Workflow,
     ) -> DbResult<()> {
+        if self.workflow_binding_in(connection).await?.is_some() {
+            return Err(fail(
+                "shared_workflow",
+                "edit the shared definition or detach this board first",
+            )
+            .into());
+        }
         let current: Workflow = self.configuration(connection, "workflow").await?;
         if &current == workflow {
             return Ok(());
         }
+        self.validate_replacement_in(connection, workflow).await?;
+        self.save_configuration(connection, "workflow", workflow)
+            .await?;
+        self.event(
+            connection,
+            actor.id,
+            now,
+            actions::BOARD_WORKFLOW_REPLACED,
+            None,
+            None,
+            serde_json::json!({"id":workflow.id}),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub(super) async fn validate_replacement_in(
+        &self,
+        connection: &mut AnyConnection,
+        workflow: &Workflow,
+    ) -> DbResult<()> {
+        let current: Workflow = self.configuration(connection, "workflow").await?;
         let states: Vec<String> = sqlx::query_scalar(
             "SELECT DISTINCT state FROM board_tickets WHERE tenant_id=$1 AND board_id=$2",
         )
@@ -180,18 +209,6 @@ impl HostedBoard {
                 .into());
             }
         }
-        self.save_configuration(connection, "workflow", workflow)
-            .await?;
-        self.event(
-            connection,
-            actor.id,
-            now,
-            actions::BOARD_WORKFLOW_REPLACED,
-            None,
-            None,
-            serde_json::json!({"id":workflow.id}),
-        )
-        .await?;
         Ok(())
     }
 
@@ -203,7 +220,7 @@ impl HostedBoard {
         })
     }
 
-    async fn configuration_state_in(
+    pub(super) async fn configuration_state_in(
         &self,
         connection: &mut AnyConnection,
     ) -> DbResult<ConfigurationState> {
@@ -230,7 +247,7 @@ impl HostedBoard {
         .await?)
     }
 
-    async fn expected_configuration(
+    pub(super) async fn expected_configuration(
         &self,
         connection: &mut AnyConnection,
         key: &str,

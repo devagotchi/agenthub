@@ -12,6 +12,7 @@ mod issues;
 mod prime;
 mod reads;
 mod settings;
+mod shared_workflows;
 mod tickets;
 
 pub use prime::{Held, NoteToMe, Prime, Ready};

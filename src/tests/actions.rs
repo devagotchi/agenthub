@@ -7,8 +7,8 @@ use std::path::Path;
 use super::{board_changes, fixture, or_skip, quiet};
 use crate::{Actor, DepKind, NewTicket, Patch, ProjectSettings, Settings, TicketSource, actions};
 
-const SUBJECTS: [&str; 8] = [
-    "ticket", "lease", "note", "dep", "approval", "board", "issue", "wake",
+const SUBJECTS: [&str; 9] = [
+    "ticket", "lease", "note", "dep", "approval", "board", "issue", "wake", "workflow",
 ];
 
 #[test]
@@ -25,8 +25,9 @@ fn every_action_is_a_subject_and_a_past_participle() {
         );
         // One word is the participle: `settings_changed`, `handed_off`, `set`.
         assert!(
-            verb.split('_')
-                .any(|word| word.ends_with("ed") || word.ends_with("en") || word == "set"),
+            verb.split('_').any(|word| word.ends_with("ed")
+                || word.ends_with("en")
+                || matches!(word, "set" | "bound")),
             "{action}: {verb} has no past participle"
         );
         assert!(seen.insert(action), "{action} twice");
@@ -61,10 +62,18 @@ fn has_action_literal(call: &str) -> bool {
 #[test]
 fn the_store_names_every_action_by_its_constant() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let mut files: Vec<_> = std::fs::read_dir(src.join("hosted"))
-        .unwrap()
-        .map(|entry| entry.unwrap().path())
-        .collect();
+    fn rust_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                rust_files(&path, files);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                files.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    rust_files(&src.join("hosted"), &mut files);
     files.push(src.join("approval.rs"));
     let mut calls = 0;
     for path in files {

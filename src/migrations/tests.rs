@@ -28,7 +28,7 @@ async fn on_its_own_every_table_is_a_board_table_with_its_own_history() {
             .fetch_all(&mut *connection)
             .await
             .unwrap();
-    assert_eq!(versions, vec![1, 2, 3]);
+    assert_eq!(versions, vec![1, 2, 3, 4]);
 }
 
 #[tokio::test]
@@ -54,6 +54,40 @@ async fn configuration_version_adopts_existing_values_without_rewriting_them() {
         .bind(crate::LOCAL_TENANT).fetch_one(&mut connection).await.unwrap();
     assert_eq!(row, (value, 1));
     drop(store);
+}
+
+#[tokio::test]
+async fn shared_catalog_upgrade_keeps_existing_workflows_private_and_unchanged() {
+    let url = or_skip!(testing::empty_postgres());
+    testing::migrated_to(&url, &MIGRATIONS, 3).await;
+    let mut connection = <sqlx::AnyConnection as sqlx::Connection>::connect(&url)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO devagotchi.board_projects (tenant_id,id,source_hash,imported_at,owner_id,project_name) VALUES ($1,'before','native',1,'alice','before')")
+        .bind(crate::LOCAL_TENANT).execute(&mut connection).await.unwrap();
+    let mut workflow = crate::Workflow::default_workflow();
+    workflow.name = "Keep my private workflow".into();
+    for (key, value, version) in [
+        ("workflow", serde_json::to_string(&workflow).unwrap(), 7_i64),
+        (
+            "settings",
+            serde_json::to_string(&crate::Settings::default()).unwrap(),
+            3_i64,
+        ),
+    ] {
+        sqlx::query("INSERT INTO devagotchi.board_settings (tenant_id,board_id,key,value,version) VALUES ($1,'before',$2,$3,$4)")
+            .bind(crate::LOCAL_TENANT).bind(key).bind(value).bind(version).execute(&mut connection).await.unwrap();
+    }
+    let store = devagotchi_store::Store::open(&url, &[&MIGRATIONS])
+        .await
+        .unwrap();
+    let board = crate::hosted::HostedBoard::new(store, crate::LOCAL_TENANT, "before").unwrap();
+    let context = board.workflow_configuration().await.unwrap();
+    assert_eq!(context.configuration.workflow, workflow);
+    assert_eq!(context.configuration.workflow_version, 7);
+    assert_eq!(context.configuration.settings_version, 3);
+    assert!(context.shared_workflow.is_none());
+    assert!(board.shared_workflows().await.unwrap().is_empty());
 }
 
 /// Opened again, nothing changes: every statement finds what it would make.
