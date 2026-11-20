@@ -2,9 +2,30 @@
 
 use devagotchi_contracts::BridgeResult;
 
-use crate::{Actor, Board, ProjectSettings, Settings, Workflow};
+use crate::{Actor, Board, ConfigurationState, ProjectSettings, Settings, SettingsEdit, Workflow};
 
 impl Board {
+    pub fn configuration_state(&self) -> BridgeResult<ConfigurationState> {
+        self.hosted_call(self.hosted.configuration_state())
+    }
+
+    pub fn edit_settings(
+        &self,
+        actor: &Actor<'_>,
+        expected: i64,
+        edit: &SettingsEdit,
+    ) -> BridgeResult<ConfigurationState> {
+        self.hosted_call(self.hosted.edit_settings(actor, expected, edit))
+    }
+
+    pub fn edit_workflow(
+        &self,
+        actor: &Actor<'_>,
+        expected: i64,
+        workflow: &Workflow,
+    ) -> BridgeResult<ConfigurationState> {
+        self.hosted_call(self.hosted.edit_workflow(actor, expected, workflow))
+    }
     pub fn settings(&self) -> BridgeResult<Settings> {
         self.hosted_call(self.hosted.settings())
     }

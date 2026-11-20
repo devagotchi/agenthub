@@ -28,7 +28,32 @@ async fn on_its_own_every_table_is_a_board_table_with_its_own_history() {
             .fetch_all(&mut *connection)
             .await
             .unwrap();
-    assert_eq!(versions, vec![1, 2]);
+    assert_eq!(versions, vec![1, 2, 3]);
+}
+
+#[tokio::test]
+async fn configuration_version_adopts_existing_values_without_rewriting_them() {
+    let url = or_skip!(testing::empty_postgres());
+    testing::migrated_to(&url, &MIGRATIONS, 2).await;
+    let mut connection = <sqlx::AnyConnection as sqlx::Connection>::connect(&url)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO devagotchi.board_projects (tenant_id,id,source_hash,imported_at) VALUES ($1,'existing','native',1)")
+        .bind(crate::LOCAL_TENANT).execute(&mut connection).await.unwrap();
+    let settings = crate::Settings {
+        default_priority: 9,
+        ..Default::default()
+    };
+    let value = serde_json::to_string(&settings).unwrap();
+    sqlx::query("INSERT INTO devagotchi.board_settings (tenant_id,board_id,key,value) VALUES ($1,'existing','settings',$2)")
+        .bind(crate::LOCAL_TENANT).bind(&value).execute(&mut connection).await.unwrap();
+    let store = devagotchi_store::Store::open(&url, &[&MIGRATIONS])
+        .await
+        .unwrap();
+    let row: (String, i64) = sqlx::query_as("SELECT value,version FROM devagotchi.board_settings WHERE tenant_id=$1 AND board_id='existing' AND key='settings'")
+        .bind(crate::LOCAL_TENANT).fetch_one(&mut connection).await.unwrap();
+    assert_eq!(row, (value, 1));
+    drop(store);
 }
 
 /// Opened again, nothing changes: every statement finds what it would make.

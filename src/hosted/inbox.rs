@@ -36,7 +36,7 @@ impl HostedBoard {
     ) -> DbResult<()> {
         sqlx::query(
             "INSERT INTO board_settings (tenant_id,board_id,key,value) VALUES ($1,$2,$3,$4)
-             ON CONFLICT (tenant_id,board_id,key) DO UPDATE SET value=excluded.value",
+             ON CONFLICT (tenant_id,board_id,key) DO UPDATE SET value=excluded.value,version=board_settings.version+1",
         )
         .bind(&self.tenant)
         .bind(&self.project)
@@ -174,7 +174,7 @@ impl HostedBoard {
             }
             sqlx::query(
                 "INSERT INTO board_settings (tenant_id,board_id,key,value) VALUES ($1,$2,$3,$4)
-                 ON CONFLICT (tenant_id,board_id,key) DO UPDATE SET value=excluded.value",
+                 ON CONFLICT (tenant_id,board_id,key) DO UPDATE SET value=excluded.value,version=board_settings.version+1",
             )
             .bind(&self.tenant)
             .bind(&self.project)

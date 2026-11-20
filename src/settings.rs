@@ -52,6 +52,81 @@ pub struct ProjectSettings {
     pub environments: Option<Vec<String>>,
 }
 
+/// One consistent configuration read, with independent versions for the two forms.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConfigurationState {
+    pub settings: Settings,
+    pub settings_version: i64,
+    pub workflow: crate::Workflow,
+    pub workflow_version: i64,
+}
+
+/// Human-editable settings. Standing approvals have their own authority and lifecycle.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettingsEdit {
+    pub lease_ttl_ms: i64,
+    pub lease_min_ttl_ms: i64,
+    pub lease_max_ttl_ms: i64,
+    pub max_lease_expiries: i64,
+    pub wip_limit_default: i64,
+    pub default_priority: i64,
+    pub repo: Option<String>,
+    pub environments: Vec<String>,
+}
+
+impl From<&Settings> for SettingsEdit {
+    fn from(s: &Settings) -> Self {
+        Self {
+            lease_ttl_ms: s.lease_ttl_ms,
+            lease_min_ttl_ms: s.lease_min_ttl_ms,
+            lease_max_ttl_ms: s.lease_max_ttl_ms,
+            max_lease_expiries: s.max_lease_expiries,
+            wip_limit_default: s.wip_limit_default,
+            default_priority: s.default_priority,
+            repo: s.repo.clone(),
+            environments: s.environments.clone(),
+        }
+    }
+}
+
+impl SettingsEdit {
+    pub(crate) fn apply(&self, current: &Settings, now: i64) -> BridgeResult<Settings> {
+        if self.lease_min_ttl_ms <= 0
+            || self.lease_ttl_ms < self.lease_min_ttl_ms
+            || self.lease_max_ttl_ms < self.lease_ttl_ms
+            || now.checked_add(self.lease_max_ttl_ms).is_none()
+        {
+            return Err(crate::invalid(
+                "lease durations require 0 < minimum <= default <= maximum, within the clock's range",
+            ));
+        }
+        if self.max_lease_expiries < 0 || self.wip_limit_default < 0 {
+            return Err(crate::invalid(
+                "WIP and expiry limits cannot be negative; zero means unlimited",
+            ));
+        }
+        let repo = self
+            .repo
+            .as_deref()
+            .filter(|r| !r.trim().is_empty())
+            .map(check_repo)
+            .transpose()?;
+        let environments = check_environments(&self.environments)?;
+        Ok(Settings {
+            lease_ttl_ms: self.lease_ttl_ms,
+            lease_min_ttl_ms: self.lease_min_ttl_ms,
+            lease_max_ttl_ms: self.lease_max_ttl_ms,
+            max_lease_expiries: self.max_lease_expiries,
+            wip_limit_default: self.wip_limit_default,
+            default_priority: self.default_priority,
+            repo,
+            environments,
+            standing: current.standing.clone(),
+        })
+    }
+}
+
 /// A project's repo: an https URL with a host, no spaces, at most 500 characters.
 pub(crate) fn check_repo(repo: &str) -> BridgeResult<String> {
     let repo = repo.trim();
