@@ -102,6 +102,7 @@ pub(crate) fn request_digest(
 ) -> String {
     let inputs = Inputs {
         assignee: new.assignee.as_deref(),
+        depends_on: new.depends_on.iter().collect(),
         description: &new.description,
         discovered_from: new.discovered_from.as_deref(),
         environment,
@@ -127,6 +128,8 @@ pub(crate) fn request_digest(
 #[derive(Serialize)]
 struct Inputs<'a> {
     assignee: Option<&'a str>,
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    depends_on: std::collections::BTreeSet<&'a String>,
     description: &'a str,
     discovered_from: Option<&'a str>,
     environment: Option<&'a str>,
