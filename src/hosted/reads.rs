@@ -70,7 +70,14 @@ impl HostedBoard {
         filter: &Filter,
         ready_for: Option<&str>,
     ) -> DbResult<Vec<Ticket>> {
-        let pattern = filter.text.as_ref().map(|text| {
+        let text = filter
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        // Keep the existing literal wildcard contract while restoring web-search terms.
+        let web_search = text.is_some_and(|text| !text.contains(['%', '_', '\\']));
+        let pattern = text.map(|text| {
             format!(
                 "%{}%",
                 text.replace('\\', "\\\\")
@@ -87,7 +94,13 @@ impl HostedBoard {
                AND ($6::text IS NULL OR parent=$6)
                AND ($7::text IS NULL OR kind=$7)
                AND ($8::text IS NULL OR jsonb_exists(labels::jsonb,$8))
-               AND ($9::text IS NULL OR title ILIKE $9 ESCAPE '\\' OR description ILIKE $9 ESCAPE '\\')
+               AND ($9::text IS NULL OR title ILIKE $9 ESCAPE '\\' OR description ILIKE $9 ESCAPE '\\'
+                    OR id=$16
+                    OR ($17::boolean AND to_tsvector('simple', title || ' ' || description)
+                        @@ websearch_to_tsquery('simple', $16))
+                    OR EXISTS (SELECT 1 FROM board_notes n
+                        WHERE n.tenant_id=$1 AND n.board_id=$2 AND n.ticket=board_tickets.id
+                          AND n.body ILIKE $9 ESCAPE '\\'))
                AND ($10::text IS NULL OR machine=$10)
                AND ($11::text IS NULL OR repo=$11)
                AND ($12::text IS NULL OR environment=$12)
@@ -100,6 +113,7 @@ impl HostedBoard {
             .bind(clean_anchor(&filter.anchors.machine)).bind(clean_anchor(&filter.anchors.repo))
             .bind(clean_anchor(&filter.anchors.environment)).bind(clean_anchor(&filter.anchors.agent))
             .bind(clean_anchor(&filter.anchors.session)).bind(clean_anchor(&filter.anchors.fingerprint))
+            .bind(text).bind(web_search)
             .fetch_all(&mut *connection).await?;
         let mut tickets = Vec::new();
         let limit = filter.limit.unwrap_or(200).max(1);

@@ -268,6 +268,7 @@ pub struct Filter {
     /// Only tickets that are claimable now (a lane queue, no open blockers, unheld or lapsed).
     pub ready: bool,
     pub open_only: bool,
+    /// Title/description web-search, literal substrings (also notes), or an exact ticket ID.
     pub text: Option<String>,
     /// Equality on each anchor and the fingerprint.
     pub anchors: Anchors,
