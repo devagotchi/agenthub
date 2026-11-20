@@ -115,6 +115,7 @@ mod inbox;
 mod lanes;
 mod operations;
 mod schema;
+mod search;
 mod sources;
 mod standalone;
 mod standing;
