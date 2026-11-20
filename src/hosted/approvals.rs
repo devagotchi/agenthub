@@ -1,10 +1,11 @@
 //! Approvals in Postgres: asking (decided at once when a live standing authorization covers
 //! the step), a person's decision (optionally allowing the same step ahead of time), and the
-//! reads the approvals page shows. Standing authorizations themselves are `standing.rs`. Each intent is
-//! one transaction on the database clock (`.ai/patterns/board-operations.md`, rules 1 to 3).
+//! reads the approvals page shows. Standing authorizations themselves are `standing.rs`.
+//! Each intent is one transaction on the database clock
+//! (`.ai/patterns/board-operations.md`, rules 1 to 3).
 
-use super::*;
 use super::standing::{checked_days, standing_id};
+use super::*;
 use crate::approval::{
     ApprovalStatus, Ask, DAY_MS, KIND, Standing, Verdict, checked, label_value, landing, text,
 };
