@@ -18,6 +18,14 @@ Both run the same code (`src/hosted/`); a standalone board is the hosted board u
 tenant. There was a SQLite standalone board before; nothing moves from a `board.sqlite3` (this is
 pre-release, and there is no importer): `board init` makes a new, empty board.
 
+Board configuration is versioned in those same Postgres rows. `configuration_state` reads
+settings and workflow with their independent versions; `edit_settings` and `edit_workflow`
+require a human actor and the version shown to that person. A stale save is refused as
+`version_conflict`. Settings edits preserve standing approvals, which keep their own grant
+and revoke operations. Workflow edits cannot remove or change the kind of a state used by
+existing tickets, or leave active states without a runnable work stage. The host still
+authenticates the person and checks their authority to configure the selected board.
+
 AgentHub is part of [Devagotchi](https://github.com/devagotchi/devagotchi), which serves its
 boards through its hub's MCP tools and pages and pulls this repository in as a submodule at
 `crates/agenthub`. It builds and tests on its own as well.
@@ -29,7 +37,9 @@ cargo test
 ```
 
 The board's tests need a Postgres: point `DEVAGOTCHI_TEST_POSTGRES_URL` at a server (each test
-makes a database of its own there). Without it they are skipped.
+makes a database of its own there). Without it they are skipped, unless
+`DEVAGOTCHI_TEST_REQUIRE_POSTGRES=1`, as CI requires. Use `-- --test-threads=4` on a
+local server with the default connection limit when running the parent workspace suite.
 
 ```sh
 docker run -d --name agenthub-pg -e POSTGRES_HOST_AUTH_METHOD=trust -p 127.0.0.1:55432:5432 postgres:18-bookworm

@@ -155,6 +155,30 @@ impl Workflow {
     /// states exist.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn validate(&self) -> Result<(), String> {
+        let identifier = |key: &str| {
+            !key.is_empty()
+                && key.len() <= 64
+                && key
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+        };
+        let label = |name: &str| {
+            !name.trim().is_empty()
+                && name.chars().count() <= 160
+                && !name.chars().any(char::is_control)
+        };
+        if !identifier(&self.id) || !label(&self.name) {
+            return Err("a workflow needs an identifier and a printable name".into());
+        }
+        let mut states = std::collections::HashSet::new();
+        for state in &self.states {
+            if !identifier(&state.key) || !label(&state.label) {
+                return Err("each state needs an identifier and a printable label".into());
+            }
+            if !states.insert(state.key.as_str()) {
+                return Err(format!("state {:?} is named twice", state.key));
+            }
+        }
         let known = |key: &str| self.state(key).is_some();
         if !known(&self.initial_state) {
             return Err(format!(
@@ -168,7 +192,22 @@ impl Workflow {
                 self.attention_state
             ));
         }
+        if matches!(
+            self.kind(&self.initial_state),
+            Some(StateKind::Active | StateKind::Done)
+        ) {
+            return Err("the initial state must accept new, unheld, unfinished tasks".into());
+        }
+        if self.kind(&self.attention_state) != Some(StateKind::Attention) {
+            return Err("attention_state must have the attention type".into());
+        }
+        let mut queues = std::collections::HashSet::new();
+        let mut actives = std::collections::HashSet::new();
         for lane in &self.lanes {
+            if !queues.insert(lane.queue.as_str()) || !actives.insert(lane.active.as_str()) {
+                return Err("a queue and an active state each belong to one work stage".into());
+            }
+
             for key in [
                 &lane.queue,
                 &lane.active,
@@ -194,8 +233,33 @@ impl Workflow {
                     lane.active
                 ));
             }
+            if self.kind(&lane.complete_to) == Some(StateKind::Active)
+                || matches!(
+                    self.kind(&lane.release_to),
+                    Some(StateKind::Active | StateKind::Done)
+                )
+            {
+                return Err("completion must leave the active state; release must return to unfinished, unheld work".into());
+            }
         }
+        for state in &self.states {
+            if state.kind == StateKind::Active && !actives.contains(state.key.as_str()) {
+                return Err(format!("active state {:?} needs a work stage", state.key));
+            }
+        }
+        let mut transitions = std::collections::HashSet::new();
         for t in &self.transitions {
+            if !transitions.insert((t.from.as_str(), t.to.as_str())) {
+                return Err("a manual transition is listed twice".into());
+            }
+            if self.kind(&t.from) == Some(StateKind::Active)
+                || self.kind(&t.to) == Some(StateKind::Active)
+            {
+                return Err(
+                    "active states change through work stages, not manual transitions".into(),
+                );
+            }
+
             if t.from != "*" && !known(&t.from) {
                 return Err(format!("transition from unknown state {:?}", t.from));
             }

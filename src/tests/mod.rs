@@ -108,6 +108,7 @@ impl Fixture {
 mod actions;
 mod anchors;
 mod approvals;
+mod configuration;
 mod create_dependencies;
 mod event_filters;
 mod hosted;

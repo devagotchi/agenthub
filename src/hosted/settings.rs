@@ -3,8 +3,8 @@
 //! announces nothing (rule 6).
 
 use super::*;
-use crate::ProjectSettings;
 use crate::chain::actions;
+use crate::{ConfigurationState, ProjectSettings, SettingsEdit};
 
 impl HostedBoard {
     pub async fn settings(&self) -> BridgeResult<Settings> {
@@ -33,29 +33,41 @@ impl HostedBoard {
                 "lease ttl bounds must satisfy min <= default <= max, min > 0",
             ));
         }
-        let new = serde_json::to_value(settings).expect("settings json");
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
-            let current: Settings = self.configuration(connection, "settings").await?;
-            let current = serde_json::to_value(&current).expect("settings json");
-            let changed = changed_keys(&current, &new);
-            if changed.is_empty() {
-                return Ok(());
-            }
-            self.save_configuration(connection, "settings", settings)
-                .await?;
-            self.event(
-                connection,
-                actor.id,
-                now,
-                actions::BOARD_SETTINGS_REPLACED,
-                None,
-                None,
-                serde_json::json!({ "changed": changed }),
-            )
-            .await?;
-            Ok(())
+            self.replace_settings_in(connection, actor, now, settings)
+                .await
         })
+    }
+
+    async fn replace_settings_in(
+        &self,
+        connection: &mut AnyConnection,
+        actor: &Actor<'_>,
+        now: i64,
+        settings: &Settings,
+    ) -> DbResult<()> {
+        let current: Settings = self.configuration(connection, "settings").await?;
+        let changed = changed_keys(
+            &serde_json::to_value(&current).expect("settings json"),
+            &serde_json::to_value(settings).expect("settings json"),
+        );
+        if changed.is_empty() {
+            return Ok(());
+        }
+        self.save_configuration(connection, "settings", settings)
+            .await?;
+        self.event(
+            connection,
+            actor.id,
+            now,
+            actions::BOARD_SETTINGS_REPLACED,
+            None,
+            None,
+            serde_json::json!({"changed":changed}),
+        )
+        .await?;
+        Ok(())
     }
 
     pub(super) async fn save_configuration<T: serde::Serialize>(
@@ -66,7 +78,7 @@ impl HostedBoard {
     ) -> DbResult<()> {
         let value = serde_json::to_string(value).map_err(|error| invalid(error.to_string()))?;
         sqlx::query(
-            "UPDATE board_settings SET value=$4 WHERE tenant_id=$1 AND board_id=$2 AND key=$3",
+            "UPDATE board_settings SET value=$4,version=version+1 WHERE tenant_id=$1 AND board_id=$2 AND key=$3",
         )
         .bind(&self.tenant)
         .bind(&self.project)
@@ -131,36 +143,156 @@ impl HostedBoard {
         workflow.validate().map_err(invalid)?;
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
-            let current: Workflow = self.configuration(connection, "workflow").await?;
-            if &current == workflow {
-                return Ok(());
-            }
-            let states: Vec<String> = sqlx::query_scalar(
-                "SELECT DISTINCT state FROM board_tickets WHERE tenant_id=$1 AND board_id=$2",
-            )
-            .bind(&self.tenant)
-            .bind(&self.project)
-            .fetch_all(&mut *connection)
-            .await?;
-            if let Some(unknown) = states.iter().find(|state| workflow.state(state).is_none()) {
+            self.replace_workflow_in(connection, actor, now, workflow)
+                .await
+        })
+    }
+
+    async fn replace_workflow_in(
+        &self,
+        connection: &mut AnyConnection,
+        actor: &Actor<'_>,
+        now: i64,
+        workflow: &Workflow,
+    ) -> DbResult<()> {
+        let current: Workflow = self.configuration(connection, "workflow").await?;
+        if &current == workflow {
+            return Ok(());
+        }
+        let states: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT state FROM board_tickets WHERE tenant_id=$1 AND board_id=$2",
+        )
+        .bind(&self.tenant)
+        .bind(&self.project)
+        .fetch_all(&mut *connection)
+        .await?;
+        for state in states {
+            if workflow.state(&state).is_none() {
                 return Err(invalid(format!(
-                    "tickets are in state {unknown:?}, which the new workflow lacks"
+                    "tickets are in state {state:?}, which the new workflow lacks"
                 ))
                 .into());
             }
-            self.save_configuration(connection, "workflow", workflow)
-                .await?;
-            self.event(
-                connection,
-                actor.id,
-                now,
-                actions::BOARD_WORKFLOW_REPLACED,
-                None,
-                None,
-                serde_json::json!({"id":workflow.id}),
-            )
+            if current.kind(&state) != workflow.kind(&state) {
+                return Err(invalid(format!(
+                    "state {state:?} is used by tickets; keep its type and change its label instead"
+                ))
+                .into());
+            }
+        }
+        self.save_configuration(connection, "workflow", workflow)
             .await?;
-            Ok(())
+        self.event(
+            connection,
+            actor.id,
+            now,
+            actions::BOARD_WORKFLOW_REPLACED,
+            None,
+            None,
+            serde_json::json!({"id":workflow.id}),
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Read both values and their versions in one scoped database snapshot.
+    pub async fn configuration_state(&self) -> BridgeResult<ConfigurationState> {
+        transaction!(&self.store, |connection| {
+            self.scope(connection).await?;
+            self.configuration_state_in(connection).await
+        })
+    }
+
+    async fn configuration_state_in(
+        &self,
+        connection: &mut AnyConnection,
+    ) -> DbResult<ConfigurationState> {
+        Ok(ConfigurationState {
+            settings: self.configuration(connection, "settings").await?,
+            settings_version: self.configuration_version(connection, "settings").await?,
+            workflow: self.configuration(connection, "workflow").await?,
+            workflow_version: self.configuration_version(connection, "workflow").await?,
+        })
+    }
+
+    async fn configuration_version(
+        &self,
+        connection: &mut AnyConnection,
+        key: &str,
+    ) -> DbResult<i64> {
+        Ok(sqlx::query_scalar(
+            "SELECT version FROM board_settings WHERE tenant_id=$1 AND board_id=$2 AND key=$3",
+        )
+        .bind(&self.tenant)
+        .bind(&self.project)
+        .bind(key)
+        .fetch_one(&mut *connection)
+        .await?)
+    }
+
+    async fn expected_configuration(
+        &self,
+        connection: &mut AnyConnection,
+        key: &str,
+        expected: i64,
+    ) -> DbResult<()> {
+        let actual = self.configuration_version(connection, key).await?;
+        if actual != expected {
+            return Err(fail(
+                "version_conflict",
+                format!("{key} changed from version {expected} to {actual}; reload before saving"),
+            )
+            .into());
+        }
+        Ok(())
+    }
+
+    /// Edit the person's settings, preserving standing approvals in the same transaction.
+    pub async fn edit_settings(
+        &self,
+        actor: &Actor<'_>,
+        expected: i64,
+        edit: &SettingsEdit,
+    ) -> BridgeResult<ConfigurationState> {
+        if !actor.human {
+            return Err(fail(
+                "humans_only",
+                "only a person edits board coordination settings",
+            ));
+        }
+        transaction!(&self.store, |connection| {
+            let now = self.scope(connection).await?;
+            self.expected_configuration(connection, "settings", expected)
+                .await?;
+            let current = self.configuration(connection, "settings").await?;
+            let next = edit.apply(&current, now)?;
+            self.replace_settings_in(connection, actor, now, &next)
+                .await?;
+            self.configuration_state_in(connection).await
+        })
+    }
+
+    /// A versioned human change; no task is reinterpreted or orphaned by configuration.
+    pub async fn edit_workflow(
+        &self,
+        actor: &Actor<'_>,
+        expected: i64,
+        workflow: &Workflow,
+    ) -> BridgeResult<ConfigurationState> {
+        if !actor.human {
+            return Err(fail(
+                "humans_only",
+                "only a person edits the board workflow",
+            ));
+        }
+        workflow.validate().map_err(invalid)?;
+        transaction!(&self.store, |connection| {
+            let now = self.scope(connection).await?;
+            self.expected_configuration(connection, "workflow", expected)
+                .await?;
+            self.replace_workflow_in(connection, actor, now, workflow)
+                .await?;
+            self.configuration_state_in(connection).await
         })
     }
 }
