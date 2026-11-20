@@ -123,6 +123,13 @@ impl HostedBoard {
         if let Some(from) = &new.discovered_from {
             self.ticket(connection, from, &workflow, now).await?;
         }
+        let dependencies: std::collections::BTreeSet<_> = new.depends_on.iter().collect();
+        if dependencies.len() > 100 {
+            return Err(invalid("a new ticket may depend on at most 100 tickets").into());
+        }
+        for dependency in &dependencies {
+            self.ticket(connection, dependency, &workflow, now).await?;
+        }
         sqlx::query(
                 "INSERT INTO board_tickets
                  (tenant_id,board_id,id,kind,title,description,state,priority,labels,parent,assignee,
@@ -151,6 +158,16 @@ impl HostedBoard {
         }
         let mut data =
             serde_json::json!({"title":title,"state":workflow.initial_state,"parent":new.parent});
+        for dependency in &dependencies {
+            sqlx::query(
+                "INSERT INTO board_deps (tenant_id,board_id,ticket,depends_on,kind,created_by,created_at)
+                 VALUES ($1,$2,$3,$4,'blocks',$5,$6)",
+            ).bind(&self.tenant).bind(&self.project).bind(&id).bind(dependency.as_str())
+                .bind(actor.id).bind(now).execute(&mut *connection).await?;
+        }
+        if !dependencies.is_empty() {
+            data["depends_on"] = serde_json::json!(dependencies);
+        }
         if let (Some(source), Some(request_sha256)) = (&new.source, request_sha256) {
             let provenance = TicketProvenance {
                 source: source.clone(),

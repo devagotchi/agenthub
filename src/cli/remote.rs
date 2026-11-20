@@ -138,6 +138,7 @@ impl Face for Remote {
                 "priority": new.priority,
                 "labels": new.labels,
                 "parent": new.parent,
+                "depends_on": new.depends_on,
                 "assignee": new.assignee,
                 "discovered_from": new.discovered_from,
                 "machine": new.anchors.machine,

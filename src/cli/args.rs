@@ -15,7 +15,7 @@ pub const USAGE: &str = "Usage: devagotchi board <command> [options]
   ready     [--limit N]            tickets you could claim now, best first
   ls        [--state S] [--label L] [--text T] [--open] [--limit N] [ANCHORS]
   show      ID
-  new       TITLE [--desc D] [--priority N] [--label L]... [--parent ID] [--assign ID] [--found-in ID] [--epic] [ANCHORS]
+  new       TITLE [--desc D] [--priority N] [--label L]... [--parent ID] [--depends-on ID]... [--assign ID] [--found-in ID] [--epic] [ANCHORS]
             [--origin JSON]        imported from {path,item[,revision][,content_sha256]}: once per board; a repeat returns the ticket, changed inputs conflict
   claim     [ID] [--ttl SECONDS] [--label L] [--state S]   no ID: the best ready ticket
   beat      [ID] [--progress JSON] [--fence N]   no ID: every ticket you hold (what the hook pack calls)
@@ -65,6 +65,7 @@ pub(super) const VALUE_FLAGS: &[&str] = &[
     "--desc",
     "--priority",
     "--parent",
+    "--depends-on",
     "--assign",
     "--found-in",
     "--origin",

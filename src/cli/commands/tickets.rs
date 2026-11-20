@@ -28,6 +28,7 @@ pub(super) fn new(c: Command<'_, '_>) -> CommandResult {
             priority: parsed.int("--priority").map_err(usage_error)?,
             labels: parsed.flag_all("--label"),
             parent: parsed.flag("--parent").map(str::to_string),
+            depends_on: parsed.flag_all("--depends-on"),
             assignee: parsed.flag("--assign").map(str::to_string),
             discovered_from: parsed.flag("--found-in").map(str::to_string),
             anchors: parsed.anchors(),

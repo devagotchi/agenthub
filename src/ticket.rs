@@ -223,6 +223,8 @@ pub struct NewTicket {
     pub labels: Vec<String>,
     /// Makes the id hierarchical (`parent.n`) and records a `parent` dependency.
     pub parent: Option<String>,
+    /// Existing tickets that must finish first; created atomically with this ticket.
+    pub depends_on: Vec<String>,
     pub assignee: Option<String>,
     /// Records a `discovered-from` dependency.
     pub discovered_from: Option<String>,
