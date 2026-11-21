@@ -15,7 +15,9 @@ use super::{
 };
 use devagotchi_store::{Failed, Store, transaction};
 
+mod access;
 mod approvals;
+pub use access::TaskLeaseBinding;
 mod claims;
 mod delegation;
 mod edits;

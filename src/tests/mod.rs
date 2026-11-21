@@ -105,6 +105,7 @@ impl Fixture {
     }
 }
 
+mod access_binding;
 mod actions;
 mod anchors;
 mod approvals;
