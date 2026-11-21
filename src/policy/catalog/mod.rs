@@ -1,6 +1,6 @@
 //! Composable principal policy storage.
 //!
-//! Owns: board_roles, board_policy_rules and board_principal_settings.
+//! Owns: board_roles, board_policy_rules, board_principal_settings and board_policy_seed_marks.
 //! Serves: scoped serializable catalog reads/writes and profile-reference validation.
 //! Settings: versioned kinds, roles, rules and WIP default through the host's owner pages.
 //! Depends on: the policy evaluator and PostgreSQL; the host authenticates the actor,
@@ -13,6 +13,9 @@ use sqlx::AnyConnection;
 
 use super::{Resource, Rule, Subject, decide};
 
+mod access_seed;
+#[cfg(test)]
+mod access_seed_tests;
 mod mutations;
 #[cfg(test)]
 mod tests;
@@ -101,14 +104,14 @@ pub async fn lock_in(connection: &mut AnyConnection, tenant: &str) -> DbResult<(
     Ok(())
 }
 
-/// First setup only: subsequent calls never restore deleted or edited configuration.
+/// First setup per source family: subsequent calls never restore deleted or edited configuration.
 /// The trusted host calls this while creating its environment/account, before exposure.
 pub async fn initialize_in(connection: &mut AnyConnection, tenant: &str) -> DbResult<()> {
     lock_in(connection, tenant).await?;
     let inserted = sqlx::query("INSERT INTO board_principal_settings (tenant_id,version,value) VALUES ($1,1,$2) ON CONFLICT (tenant_id) DO NOTHING")
         .bind(tenant).bind(json(&PrincipalSettings::default())?).execute(&mut *connection).await?.rows_affected();
     if inserted == 0 {
-        return Ok(());
+        return access_seed::initialize_in(connection, tenant).await;
     }
     for (id, description) in [
         (
@@ -129,7 +132,7 @@ pub async fn initialize_in(connection: &mut AnyConnection, tenant: &str) -> DbRe
         sqlx::query("INSERT INTO board_policy_rules (tenant_id,id,version,value) VALUES ($1,$2,1,$3) ON CONFLICT (tenant_id,id) DO NOTHING")
             .bind(tenant).bind(&rule.id).bind(json(&rule)?).execute(&mut *connection).await?;
     }
-    Ok(())
+    access_seed::initialize_in(connection, tenant).await
 }
 
 pub async fn settings_in(

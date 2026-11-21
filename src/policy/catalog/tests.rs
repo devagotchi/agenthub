@@ -22,8 +22,8 @@ async fn principal_catalog_versions_authority_and_defaults_hold_in_postgres() {
     transaction!(store, |connection| {
         store.scope(connection, tenant).await?;
         initialize_in(connection, tenant).await?;
-        assert_eq!(roles_in(connection, tenant).await?.len(), 4);
-        assert_eq!(rules_in(connection, tenant).await?.len(), 15);
+        assert_eq!(roles_in(connection, tenant).await?.len(), 6);
+        assert_eq!(rules_in(connection, tenant).await?.len(), 42);
         check_profile_in(connection, tenant, "codex", &["worker".into()]).await?;
         Ok(())
     })
@@ -76,7 +76,7 @@ async fn principal_catalog_versions_authority_and_defaults_hold_in_postgres() {
         initialize_in(connection, tenant).await?;
         assert_eq!(
             rules_in(connection, tenant).await?.len(),
-            14,
+            41,
             "deleted rules stay deleted"
         );
         assert_eq!(settings_in(connection, tenant).await?.wip_limit_default, 3);
