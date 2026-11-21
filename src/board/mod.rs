@@ -34,6 +34,22 @@ pub const PROTOCOL_LINE: &str =
     "claim → beat → note → done (or handoff with a note). Never stop holding a ticket.";
 
 impl Board {
+    /// Request-local board, preserving the original board's change subscription.
+    pub fn requested<T: serde::Serialize>(
+        &self,
+        principal: &str,
+        key: &str,
+        operation: &str,
+        input: &T,
+    ) -> BridgeResult<Self> {
+        Ok(Self {
+            hosted: self.hosted.requested(principal, key, operation, input)?,
+            project: self.project.clone(),
+            prefix: self.prefix.clone(),
+            changes: self.changes.clone(),
+        })
+    }
+
     pub async fn from_hosted(hosted: hosted::HostedBoard) -> BridgeResult<Self> {
         let prefix = hosted.prefix().await?;
         Ok(Self {

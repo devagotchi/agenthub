@@ -179,10 +179,11 @@ impl Face for Remote {
         fence: i64,
         progress: Option<Value>,
     ) -> BridgeResult<Lease> {
-        self.call(
-            "board_heartbeat",
-            json!({ "id": id, "fence": fence, "progress": progress }),
-        )
+        let mut input = json!({ "id": id, "fence": fence });
+        if let Some(progress) = progress {
+            input["progress"] = progress;
+        }
+        self.call("board_heartbeat", input)
     }
 
     fn add_note(

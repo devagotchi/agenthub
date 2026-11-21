@@ -22,7 +22,12 @@ async fn on_its_own_every_table_is_a_board_table_with_its_own_history() {
     .await
     .unwrap();
     assert!(tables.len() >= 13, "{tables:?}");
-    assert!(tables.iter().all(|t| t.starts_with("board_")), "{tables:?}");
+    assert!(
+        tables
+            .iter()
+            .all(|t| t.starts_with("board_") || t == "store_request_receipts"),
+        "{tables:?}"
+    );
     let versions: Vec<i64> =
         sqlx::query_scalar("SELECT version FROM _agenthub_migrations ORDER BY version")
             .fetch_all(&mut *connection)

@@ -5,6 +5,16 @@ use std::{future::Future, pin::Pin, sync::Arc};
 /// The host reads its own identity tables on this already scoped transaction. It must
 /// not change the scope, commit separately or treat storage failure as an unknown name.
 pub trait PrincipalDirectory: Send + Sync {
+    /// Recheck the authenticated account/profile and its policy snapshot before a
+    /// receipt can be returned. A changed snapshot must refuse and be authenticated anew.
+    fn authorize_request<'a>(
+        &'a self,
+        connection: &'a mut AnyConnection,
+        tenant: &'a str,
+        principal: &'a str,
+        actor: &'a Actor<'_>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Failed>> + Send + 'a>>;
+
     fn enabled<'a>(
         &'a self,
         connection: &'a mut AnyConnection,

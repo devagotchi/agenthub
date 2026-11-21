@@ -23,7 +23,8 @@ pub(super) fn exit_code_for(code: &str) -> u8 {
         | "in_use" | "shared_workflow" | "not_completable" => EXIT_CONFLICT,
         "not_found" => EXIT_NOT_FOUND,
         "board_store" | "board_random" | "board_id" | "no_board" | "no_storage"
-        | "board_runtime" | "board_io" | "hub_unreachable" | "hub_error" => EXIT_UNAVAILABLE,
+        | "board_runtime" | "board_io" | "hub_unreachable" | "hub_error" | "receipt_damaged"
+        | "receipt_incomplete" => EXIT_UNAVAILABLE,
         "usage" => EXIT_USAGE,
         _ => EXIT_REFUSED,
     }
@@ -100,6 +101,9 @@ pub(super) fn next_for(code: &str, id: Option<&str>) -> String {
         "approval_decide_only" => {
             "an approval changes only by a person's decision on the hub's approvals page".into()
         }
+        "request_retired" => "this key is permanently retired; reconcile the original result with board show and archived history before starting new work".into(),
+        "not_granted" => "sign in again and check the account or agent is enabled and still has access to this board".into(),
+        "receipt_damaged" | "receipt_incomplete" => "stop retrying this mutation and ask the hub operator to inspect its stored receipt; do not change the key to bypass it".into(),
         "request_conflict" => {
             "retry with the same content, or use a new request id for new content".into()
         }

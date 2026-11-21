@@ -118,6 +118,8 @@ mod hosted_lifecycle;
 mod inbox;
 mod lanes;
 mod lease_absorption;
+mod lease_receipts;
+mod mutation_receipts;
 mod operations;
 mod policy_enforcement;
 mod principal_workload;
