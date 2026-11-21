@@ -63,6 +63,13 @@ impl HostedBoard {
             .is_some_and(|m| m.replayed.load(Ordering::Relaxed))
     }
 
+    pub(crate) fn replay_flag(&self) -> Arc<AtomicBool> {
+        self.mutation
+            .as_ref()
+            .map(|mutation| mutation.replayed.clone())
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(false)))
+    }
+
     /// The host directory checks current account/profile status before receipt access.
     /// Callers must check current resource policy before returning either outcome. A
     /// state-dependent operation retains its original action and rechecks that action

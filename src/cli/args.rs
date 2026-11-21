@@ -40,11 +40,13 @@ pub const USAGE: &str = "Usage: devagotchi board <command> [options]
 ANCHORS: --machine M --repo URL --env E --agent A --session S --fingerprint F   where a ticket belongs; on ls, filters
 Global: --dir PATH (project directory; default: walk up from here)  --as ID (act as this agent)
         --json (also on when stdout is not a terminal)  --human (force the human form)  --quiet
+        --request-id KEY retries one identical mutation, preserving its original fence/session.
         --text is a human-output alias except after ls, where --text QUERY searches tasks.
 Standalone board: in the Postgres DEVAGOTCHI_BOARD_STORAGE_URL names, else the project's (init --storage URL, no password in it).
 Bound project: every command above runs on the hub as the signed-in account; --as / DEVAGOTCHI_ACTOR is your seat there.
 Exit codes: 0 ok · 2 conflict (fence, version, held, blocked, WIP, source) · 3 refused · 4 not found · 5 board unavailable · 64 usage";
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct Parsed {
     pub(super) command: String,
     pub(super) positional: Vec<String>,
@@ -53,6 +55,7 @@ pub(super) struct Parsed {
 }
 
 pub(super) const VALUE_FLAGS: &[&str] = &[
+    "--request-id",
     "--dir",
     "--as",
     "--project",

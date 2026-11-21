@@ -14,6 +14,7 @@ fn invoke(board: &dyn Face, phase: &str, body: &str, env: Option<&Path>) -> (u8,
         &mut Output {
             json: false,
             quiet: false,
+            request: None,
             out: &mut out,
             err: &mut err,
         },

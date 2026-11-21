@@ -32,13 +32,23 @@ async fn on_postgres(test: impl FnOnce() + Send + 'static) {
 }
 
 fn run(cwd: &Path, actor: Option<&str>, terminal: bool, args: &[&str]) -> (u8, String, String) {
+    run_session(cwd, actor, terminal, args, None)
+}
+
+fn run_session(
+    cwd: &Path,
+    actor: Option<&str>,
+    terminal: bool,
+    args: &[&str],
+    session: Option<&str>,
+) -> (u8, String, String) {
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let code = cli::run(
         Invocation {
             args: args.iter().map(OsString::from).collect(),
             cwd: cwd.to_path_buf(),
             actor_env: actor.map(str::to_string),
-            session_env: None,
+            session_env: session.map(str::to_string),
             os_user: Some("jesse".into()),
             stdout_is_terminal: terminal,
             account_file: Some(cwd.join("account.json")),
@@ -61,6 +71,8 @@ fn json(text: &str) -> serde_json::Value {
 }
 
 mod held_updates;
+mod receipt_transport;
+mod retries;
 mod search;
 
 #[tokio::test(flavor = "multi_thread")]

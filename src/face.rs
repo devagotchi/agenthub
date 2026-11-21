@@ -17,6 +17,17 @@ use super::{
 pub const ME: &str = "@me";
 
 pub trait Face {
+    /// Authenticate the namespace for a local retry journal, without persisting credentials.
+    fn request_identity(&self, actor: &Actor<'_>) -> BridgeResult<(String, serde_json::Value)>;
+    /// Configure this invocation's single mutation; never call on a shared/cached face.
+    fn set_request(
+        &mut self,
+        principal: &str,
+        key: &str,
+        operation: &str,
+        input: &serde_json::Value,
+    ) -> BridgeResult<std::sync::Arc<std::sync::atomic::AtomicBool>>;
+    fn replayed(&self) -> bool;
     /// Milliseconds since the epoch, as this face reckons time: for display, never a decision.
     fn now(&self) -> i64;
     fn prefix(&self) -> String;
@@ -103,6 +114,28 @@ pub trait Face {
 }
 
 impl Face for Board {
+    fn request_identity(&self, actor: &Actor<'_>) -> BridgeResult<(String, serde_json::Value)> {
+        Ok((
+            actor.id.into(),
+            serde_json::json!({"tenant":self.hosted.tenant(),"board":self.hosted.board_id(),"principal":actor.id}),
+        ))
+    }
+
+    fn set_request(
+        &mut self,
+        principal: &str,
+        key: &str,
+        operation: &str,
+        input: &serde_json::Value,
+    ) -> BridgeResult<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        *self = self.requested(principal, key, operation, input)?;
+        Ok(self.hosted.replay_flag())
+    }
+
+    fn replayed(&self) -> bool {
+        self.hosted.replayed()
+    }
+
     fn now(&self) -> i64 {
         // Display only ("12m left"): the board decides on the database's clock.
         crate::system_clock()()

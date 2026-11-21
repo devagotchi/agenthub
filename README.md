@@ -30,6 +30,30 @@ AgentHub is part of [Devagotchi](https://github.com/devagotchi/devagotchi), whic
 boards through its hub's MCP tools and pages and pulls this repository in as a submodule at
 `crates/agenthub`. It builds and tests on its own as well.
 
+## Retrying CLI changes
+
+Each single task or project-settings change generates a request key. To retry an uncertain
+result, repeat the same command with its `--request-id KEY`. Reuse the original command
+arguments; use a new key for a different change. Commands that read, import a batch, run
+hooks or manage board binding do not accept this flag.
+
+JSON results keep existing object fields and add `request_id` and `replayed`. Array results
+(such as dependencies) are under `result` when this metadata is present. JSON errors keep
+their `error` object and include the key once preparation starts. Human output prints the
+key before dispatch and labels a replay as the original result. A replay reports the
+original lease expiry and fence; it does not renew that lease or replace a newer claim.
+
+The CLI saves the original arguments, implicit session and cached fence under the project's
+ignored `.devagotchi/requests/` directory before dispatch. Keep these files when retrying
+after a restart, timeout or lost response. They may contain task text; they contain no
+account credentials or storage URLs and should not be committed or shared. The CLI does
+not automatically delete them. A damaged record refuses the write: preserve it and
+reconcile the original result before starting another request. These files only prepare
+retries; PostgreSQL stores the authoritative mutation and result in one transaction.
+
+Bound projects authenticate every attempt. Their hub must advertise atomic board request
+receipts through `whoami`; older hubs are refused before sending retryable writes.
+
 ## Building and testing
 
 ```sh
