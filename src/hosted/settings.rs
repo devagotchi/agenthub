@@ -52,6 +52,8 @@ impl HostedBoard {
         now: i64,
         settings: &Settings,
     ) -> DbResult<()> {
+        self.authorize_configuration(connection, actor, "admin.settings.put")
+            .await?;
         let current: Settings = self.configuration(connection, "settings").await?;
         let changed = changed_keys(
             &serde_json::to_value(&current).expect("settings json"),
@@ -110,6 +112,8 @@ impl HostedBoard {
             .transpose()?;
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.projects.put")
+                .await?;
             let mut settings: Settings = self.configuration(connection, "settings").await?;
             let mut changed = serde_json::Map::new();
             if let Some(repo) = &repo
@@ -160,6 +164,8 @@ impl HostedBoard {
         now: i64,
         workflow: &Workflow,
     ) -> DbResult<()> {
+        self.authorize_configuration(connection, actor, "admin.workflows.put")
+            .await?;
         if self.workflow_binding_in(connection).await?.is_some() {
             return Err(fail(
                 "shared_workflow",

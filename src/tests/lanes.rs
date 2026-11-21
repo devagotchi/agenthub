@@ -416,6 +416,7 @@ async fn wip_limit_stops_a_second_claim() {
     let generous = Actor {
         id: "claude",
         human: false,
+        policy: None,
         wip_limit: Some(0),
     };
     f.board

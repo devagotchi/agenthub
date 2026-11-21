@@ -14,6 +14,8 @@ pub struct Actor<'a> {
     pub id: &'a str,
     pub human: bool,
     pub wip_limit: Option<i64>,
+    /// Verified profile authority. Unbound legacy callers retain their host's contract.
+    pub policy: Option<crate::policy::Identity>,
 }
 
 impl<'a> Actor<'a> {
@@ -23,6 +25,7 @@ impl<'a> Actor<'a> {
             id,
             human: false,
             wip_limit: None,
+            policy: None,
         }
     }
 
@@ -32,6 +35,7 @@ impl<'a> Actor<'a> {
             id,
             human: true,
             wip_limit: None,
+            policy: None,
         }
     }
 }

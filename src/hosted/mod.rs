@@ -16,14 +16,19 @@ use super::{
 use devagotchi_store::{Failed, Store, transaction};
 
 mod approvals;
+mod delegation;
 mod edits;
 mod events;
 mod graph;
 mod inbox;
 mod issues;
+mod lease_expiry;
 mod leases;
 mod notes;
+mod policy;
 mod reads;
+mod recipients;
+pub use recipients::PrincipalDirectory;
 pub mod registry;
 mod settings;
 mod shared_workflows;
@@ -38,6 +43,7 @@ pub struct HostedBoard {
     pub name: String,
     owner: Option<String>,
     runtime: tokio::runtime::Handle,
+    principals: Option<std::sync::Arc<dyn PrincipalDirectory>>,
 }
 
 type DbResult<T> = std::result::Result<T, Failed>;
@@ -82,6 +88,7 @@ impl HostedBoard {
             project: project.into(),
             name: project.into(),
             owner: None,
+            principals: None,
             runtime: tokio::runtime::Handle::try_current()
                 .map_err(|error| fail("runtime", error.to_string()))?,
         })

@@ -85,6 +85,7 @@ impl HostedBoard {
             let standing_actor = Actor {
                 id: &by,
                 human: true,
+                policy: None,
                 wip_limit: None,
             };
             let decided = self

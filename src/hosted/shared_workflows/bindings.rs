@@ -16,6 +16,8 @@ impl HostedBoard {
         }
         transaction!(&self.store, |connection| {
             let (owner, now) = self.catalog_scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.workflows.put")
+                .await?;
             self.expected_configuration(connection, "workflow", board_version)
                 .await?;
             if self.workflow_binding_in(connection).await?.is_some() {
@@ -96,6 +98,8 @@ impl HostedBoard {
         human(actor)?;
         transaction!(&self.store, |connection| {
             let (owner, now) = self.catalog_scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.workflows.put")
+                .await?;
             self.expected_configuration(connection, "workflow", board_version)
                 .await?;
             let entry = self.entry(connection, &owner, id).await?;
@@ -122,6 +126,8 @@ impl HostedBoard {
         human(actor)?;
         transaction!(&self.store, |connection| {
             let (_, now) = self.catalog_scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.workflows.put")
+                .await?;
             self.expected_configuration(connection, "workflow", board_version)
                 .await?;
             if let Some(binding) = self.workflow_binding_in(connection).await? {

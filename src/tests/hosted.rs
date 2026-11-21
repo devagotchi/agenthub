@@ -299,6 +299,7 @@ async fn database_time_expiry_reaping_and_wip_are_enforced_across_instances() {
     let agent = Actor {
         id: "agent",
         human: false,
+        policy: None,
         wip_limit: Some(1),
     };
     let a = board

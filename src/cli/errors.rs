@@ -68,6 +68,7 @@ pub(super) fn next_for(code: &str, id: Option<&str>) -> String {
             "use claim / done / handoff / release; held tickets do not move by set".into()
         }
         "transition_not_allowed" => "board agent lists the transitions the workflow allows".into(),
+        "policy_denied" => "ask the environment owner to review this agent's roles and matching policy rule; changing credentials does not change its authority".into(),
         "humans_only" => {
             "ask the person who owns this board; run without --as to act as yourself".into()
         }

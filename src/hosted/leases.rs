@@ -7,71 +7,6 @@ use crate::chain::actions;
 use crate::lease::projection as lease;
 
 impl HostedBoard {
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn clear_lease(
-        &self,
-        connection: &mut AnyConnection,
-        actor: &str,
-        now: i64,
-        ticket: &Ticket,
-        to: &str,
-        action: &str,
-        mut data: serde_json::Value,
-    ) -> DbResult<()> {
-        sqlx::query(
-            "UPDATE board_tickets SET holder=NULL,lease_id=NULL,lease_ttl_ms=NULL,lease_expires_at=NULL,
-             state=$4,version=version+1,updated_at=$5 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
-        ).bind(&self.tenant).bind(&self.project).bind(&ticket.id).bind(to).bind(now)
-            .execute(&mut *connection).await?;
-        data["from"] = serde_json::json!(ticket.state);
-        data["to"] = serde_json::json!(to);
-        self.event(
-            connection,
-            actor,
-            now,
-            action,
-            Some(&ticket.id),
-            Some(ticket.fence),
-            data,
-        )
-        .await
-    }
-
-    pub(super) async fn expire(
-        &self,
-        connection: &mut AnyConnection,
-        actor: &str,
-        now: i64,
-        ticket: &Ticket,
-        workflow: &Workflow,
-        settings: &Settings,
-    ) -> DbResult<()> {
-        let count = ticket.expiry_count + 1;
-        let mut to = crate::lease::release_state(workflow, ticket);
-        if settings.max_lease_expiries > 0 && count >= settings.max_lease_expiries {
-            to = workflow.attention_state.clone();
-        }
-        sqlx::query(
-            "UPDATE board_tickets SET expiry_count=$4 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
-        )
-        .bind(&self.tenant)
-        .bind(&self.project)
-        .bind(&ticket.id)
-        .bind(count)
-        .execute(&mut *connection)
-        .await?;
-        self.clear_lease(
-            connection,
-            actor,
-            now,
-            ticket,
-            &to,
-            actions::LEASE_EXPIRED,
-            serde_json::json!({"previous_holder":ticket.holder,"expiry_count":count}),
-        )
-        .await
-    }
-
     pub async fn claim(
         &self,
         actor: &Actor<'_>,
@@ -134,6 +69,13 @@ impl HostedBoard {
             )
             .into());
         }
+        self.authorize(
+            connection,
+            actor,
+            &format!("task.claim:{}", lane.queue),
+            &ticket.labels,
+        )
+        .await?;
         self.check_wip(connection, actor, settings, now).await?;
         let ttl = crate::lease::clamp_ttl(settings, ttl_ms);
         let fence: i64 = sqlx::query_scalar(
@@ -257,6 +199,13 @@ impl HostedBoard {
                 .lane_by_active(&ticket.state)
                 .map(|lane| lane.complete_to.clone())
                 .ok_or_else(|| fail("not_completable", "this state has no active work stage; repair the workflow before completing"))?;
+            self.authorize(
+                connection,
+                actor,
+                &format!("task.complete:{}", ticket.state),
+                &ticket.labels,
+            )
+            .await?;
             if !summary.trim().is_empty() {
                 self.insert_note(
                     connection,
@@ -358,6 +307,20 @@ impl HostedBoard {
                 if lane.distinct_from_previous && ticket.last_worker.as_deref() == Some(actor.id) {
                     continue;
                 }
+                if let Err(error) = self
+                    .authorize(
+                        connection,
+                        actor,
+                        &format!("task.claim:{}", lane.queue),
+                        &ticket.labels,
+                    )
+                    .await
+                {
+                    match error {
+                        Failed::Refused(error) if error.code == "policy_denied" => continue,
+                        error => return Err(error),
+                    }
+                }
                 return Ok(Some(
                     self.claim_in(
                         connection,
@@ -392,6 +355,11 @@ impl HostedBoard {
             let workflow = self.configuration(connection, "workflow").await?;
             let ticket = self.ticket(connection, id, &workflow, now).await?;
             crate::lease::check_held(&ticket, actor.id, Some(fence))?;
+            self.authorize(connection, actor, "task.handoff", &ticket.labels)
+                .await?;
+            if let Some(to) = to {
+                self.recipient(connection, actor, to).await?;
+            }
             self.insert_note(
                 connection,
                 actor.id,
@@ -446,6 +414,8 @@ impl HostedBoard {
             if ticket.holder.is_none() {
                 return Err(fail("not_held", format!("{id} is not held")).into());
             }
+            self.authorize(connection, actor, "task.force_release", &ticket.labels)
+                .await?;
             self.insert_note(
                 connection,
                 actor.id,

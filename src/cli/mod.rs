@@ -182,6 +182,7 @@ pub fn run(mut invocation: Invocation, out: &mut dyn Write, err: &mut dyn Write)
     let actor = Actor {
         id: &actor_id,
         human,
+        policy: None,
         wip_limit: None,
     };
     let hook_input = if parsed.command == "hook" {

@@ -17,6 +17,8 @@ impl HostedBoard {
         workflow.validate().map_err(invalid)?;
         transaction!(&self.store, |connection| {
             let (owner, now) = self.catalog_scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.workflows.put")
+                .await?;
             let entry = self.entry(connection, &owner, id).await?;
             expected(entry.version, version)?;
             if &entry.workflow == workflow {
@@ -24,9 +26,13 @@ impl HostedBoard {
             }
             let uses = self.uses(connection, &owner, id).await?;
             let mut boards = Vec::new();
-            for (id, _) in &uses {
-                let board = Self::new(self.store.clone(), &self.tenant, id)?;
+            for (id, name) in &uses {
+                let mut board = Self::new(self.store.clone(), &self.tenant, id)?;
+                board.name = name.clone();
                 board.scope(connection).await?;
+                board
+                    .authorize_configuration(connection, actor, "admin.workflows.put")
+                    .await?;
                 board.validate_replacement_in(connection, workflow).await?;
                 boards.push(board);
             }
@@ -65,6 +71,8 @@ impl HostedBoard {
         human(actor)?;
         transaction!(&self.store, |connection| {
             let (owner, now) = self.catalog_scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.workflows.delete")
+                .await?;
             let entry = self.entry(connection, &owner, id).await?;
             expected(entry.version, version)?;
             if !self.uses(connection, &owner, id).await?.is_empty() {

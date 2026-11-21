@@ -77,6 +77,8 @@ impl HostedBoard {
             return Err(invalid("occurrences must be at least 1").into());
         }
         let labels = clean_labels(&new.labels);
+        self.authorize(connection, actor, "task.create", &labels)
+            .await?;
         let environment = clean_anchor(&new.anchors.environment);
         let fingerprint = clean_anchor(&new.anchors.fingerprint);
         let workflow: Workflow = self.configuration(connection, "workflow").await?;
@@ -252,6 +254,8 @@ impl HostedBoard {
             let workflow: Workflow = self.configuration(connection, "workflow").await?;
             let current = self.ticket(connection, id, &workflow, now).await?;
             unheld_edit(&current, version)?;
+            self.authorize(connection, actor, "task.edit", &current.labels)
+                .await?;
             let mut changed = serde_json::Map::new();
             let mut ticket = current.clone();
             if let Some(progress) = &patch.progress {
@@ -313,6 +317,13 @@ impl HostedBoard {
                 changed.insert("last_seen_at".into(), serde_json::json!(last_seen_at));
             }
             if let Some(to) = patch.state.as_ref().filter(|to| *to != &current.state) {
+                self.authorize(
+                    connection,
+                    actor,
+                    &format!("task.transition:{}->{to}", current.state),
+                    &current.labels,
+                )
+                .await?;
                 crate::check_transition(&workflow, &current, to, actor.id)?;
                 ticket.state = to.clone();
                 ticket.closed_at = workflow.is_done(to).then_some(now);
@@ -320,6 +331,13 @@ impl HostedBoard {
                 changed.insert("to".into(), serde_json::json!(to));
             }
             update_fence(&current, actor, patch.fence)?;
+            if current.holder.is_some()
+                && !current.lease_expired
+                && current.holder.as_deref() != Some(actor.id)
+            {
+                self.authorize(connection, actor, "task.edit_held", &current.labels)
+                    .await?;
+            }
             if changed.is_empty() {
                 return Ok(current);
             }
@@ -348,65 +366,6 @@ impl HostedBoard {
             self.ticket(connection, id, &workflow, now).await
         })
     }
-    /// A person hands `id` to `to` with a note saying so, as they saw it at `version`: the
-    /// assignee and the note in one transaction, one `ticket.updated` naming both.
-    pub async fn delegate(
-        &self,
-        actor: &Actor<'_>,
-        id: &str,
-        version: i64,
-        to: &str,
-        note: &str,
-    ) -> BridgeResult<Ticket> {
-        if !actor.human {
-            return Err(fail(
-                "humans_only",
-                "delegation needs a person; a worker uses handoff with its lease fence",
-            ));
-        }
-        let to = to.trim();
-        if !crate::valid_name(to) {
-            return Err(invalid(format!(
-                "{to:?} is not a name to hand a ticket to: [a-z0-9][a-z0-9-]{{0,62}}"
-            )));
-        }
-        let note = note.trim();
-        if note.is_empty() || note.chars().count() > 20_000 {
-            return Err(invalid("note body must be 1 to 20000 characters"));
-        }
-        transaction!(&self.store, |connection| {
-            let now = self.scope(connection).await?;
-            let workflow: Workflow = self.configuration(connection, "workflow").await?;
-            let current = self.ticket(connection, id, &workflow, now).await?;
-            unheld_edit(&current, version)?;
-            sqlx::query(
-                "UPDATE board_tickets SET assignee=$4,version=version+1,updated_at=$5
-                 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
-            )
-            .bind(&self.tenant)
-            .bind(&self.project)
-            .bind(id)
-            .bind(to)
-            .bind(now)
-            .execute(&mut *connection)
-            .await?;
-            let note = self
-                .insert_note(connection, actor.id, now, id, "note", note, Some(to), None)
-                .await?;
-            self.event(
-                connection,
-                actor.id,
-                now,
-                actions::TICKET_UPDATED,
-                Some(id),
-                None,
-                serde_json::json!({"assignee": to, "note_seq": note.seq}),
-            )
-            .await?;
-            self.ticket(connection, id, &workflow, now).await
-        })
-    }
-
     /// Reopen a ticket closed less than `UNDO_MS` ago by the database's clock: back to
     /// `from` when the workflow goes there, else to its initial state. `undo_too_late` once
     /// the window has passed; `transition_not_allowed` when the workflow has neither way back.
@@ -448,6 +407,13 @@ impl HostedBoard {
                 .into());
             }
             crate::check_transition(&workflow, &current, &to, actor.id)?;
+            self.authorize(
+                connection,
+                actor,
+                &format!("task.transition:{}->{to}", current.state),
+                &current.labels,
+            )
+            .await?;
             sqlx::query(
                 "UPDATE board_tickets SET state=$4,closed_at=NULL,version=version+1,updated_at=$5
                  WHERE tenant_id=$1 AND board_id=$2 AND id=$3",

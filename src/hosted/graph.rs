@@ -48,7 +48,9 @@ impl HostedBoard {
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
             let workflow = self.configuration(connection, "workflow").await?;
-            self.ticket(connection, id, &workflow, now).await?;
+            let ticket = self.ticket(connection, id, &workflow, now).await?;
+            self.authorize(connection, actor, "task.edit", &ticket.labels)
+                .await?;
             self.ticket(connection, depends_on, &workflow, now).await?;
             if kind == DepKind::Blocks {
                 let count:i64=sqlx::query_scalar(
@@ -98,6 +100,10 @@ impl HostedBoard {
     ) -> BridgeResult<Vec<Dep>> {
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
+            let workflow = self.configuration(connection, "workflow").await?;
+            let ticket = self.ticket(connection, id, &workflow, now).await?;
+            self.authorize(connection, actor, "task.edit", &ticket.labels)
+                .await?;
             let removed=sqlx::query(
                 "DELETE FROM board_deps WHERE tenant_id=$1 AND board_id=$2 AND ticket=$3 AND depends_on=$4 AND kind=$5",
             ).bind(&self.tenant).bind(&self.project).bind(id).bind(depends_on).bind(kind.as_str())
