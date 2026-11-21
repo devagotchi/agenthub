@@ -48,6 +48,7 @@ async fn fixture(store: &Store) -> (HostedBoard, crate::Lease, Arc<AtomicBool>) 
             &Actor::human("owner"),
             &NewTicket {
                 title: "Machine work".into(),
+                labels: vec!["machine-work".into()],
                 ..Default::default()
             },
         )
@@ -94,6 +95,8 @@ async fn access_binding_tracks_heartbeat_but_not_a_new_lease() {
     let (board, lease, _) = fixture(&test.store).await;
     let original = bind(&test.store, &board, &lease).await.unwrap();
     assert_eq!(original.lease_id, lease.lease_id);
+    assert_eq!(original.project, "access");
+    assert_eq!(original.labels, vec!["machine-work"]);
     assert_eq!(original.expires_at, lease.lease_expires_at);
     let beat = board
         .heartbeat(&Actor::agent("worker"), &lease.ticket.id, lease.fence, None)

@@ -8,12 +8,15 @@ use serde::{Deserialize, Serialize};
 pub struct TaskLeaseBinding {
     pub tenant: String,
     pub board: String,
+    pub project: String,
     pub ticket: String,
     pub principal: String,
     pub fence: i64,
     pub lease_id: String,
     /// Database-clock milliseconds. Evidence at the time of this check, not a renewal.
     pub expires_at: i64,
+    /// Current labels for the host's policy evaluation; they are not lease identity.
+    pub labels: Vec<String>,
 }
 
 impl HostedBoard {
@@ -63,11 +66,13 @@ impl HostedBoard {
         Ok(TaskLeaseBinding {
             tenant: self.tenant.clone(),
             board: self.project.clone(),
+            project: self.name.clone(),
             ticket: task.id,
             principal: principal.into(),
             fence,
             lease_id,
             expires_at,
+            labels: task.labels,
         })
     }
 
@@ -82,6 +87,7 @@ impl HostedBoard {
         binding: &TaskLeaseBinding,
     ) -> DbResult<TaskLeaseBinding> {
         if binding.tenant != self.tenant
+            || binding.project != self.name
             || binding.board != self.project
             || binding.principal != principal
         {
