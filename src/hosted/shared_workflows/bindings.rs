@@ -69,7 +69,7 @@ impl HostedBoard {
         })
     }
 
-    async fn bind_in(
+    pub(super) async fn bind_in(
         &self,
         connection: &mut AnyConnection,
         owner: &str,

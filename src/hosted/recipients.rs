@@ -5,6 +5,20 @@ use std::{future::Future, pin::Pin, sync::Arc};
 /// The host reads its own identity tables on this already scoped transaction. It must
 /// not change the scope, commit separately or treat storage failure as an unknown name.
 pub trait PrincipalDirectory: Send + Sync {
+    /// Refuse removal while this account's explicit project credentials still refer to
+    /// the name. Runs on the same scoped transaction; unknown hosts fail closed.
+    fn project_retirement<'a>(
+        &'a self,
+        _connection: &'a mut AnyConnection,
+        _tenant: &'a str,
+        _account: &'a str,
+        _project: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Failed>> + Send + 'a>> {
+        Box::pin(async {
+            Err(fail("not_granted", "project credential directory is unavailable").into())
+        })
+    }
+
     /// Recheck the authenticated account/profile and its policy snapshot before a
     /// receipt can be returned. A changed snapshot must refuse and be authenticated anew.
     fn authorize_request<'a>(

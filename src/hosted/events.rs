@@ -56,18 +56,21 @@ impl HostedBoard {
             .bind(limit)
             .fetch_all(&mut *connection)
             .await?;
-            rows.iter()
-                .map(|text| {
-                    let mut value: serde_json::Value = decode(text)?;
-                    let data = value["data"]
-                        .as_str()
-                        .ok_or_else(|| fail("board_damaged", "invalid event data"))?;
-                    value["data"] = decode(data)?;
-                    serde_json::from_value(value)
-                        .map_err(|error| fail("board_damaged", error.to_string()))
-                })
-                .collect::<BridgeResult<Vec<Event>>>()
-                .map_err(Failed::from)
+            decode_events(rows)
         })
     }
+}
+
+pub(in crate::hosted) fn decode_events(rows: Vec<String>) -> DbResult<Vec<Event>> {
+    rows.iter()
+        .map(|text| {
+            let mut value: serde_json::Value = decode(text)?;
+            let data = value["data"]
+                .as_str()
+                .ok_or_else(|| fail("board_damaged", "invalid event data"))?;
+            value["data"] = decode(data)?;
+            serde_json::from_value(value).map_err(|error| fail("board_damaged", error.to_string()))
+        })
+        .collect::<BridgeResult<Vec<Event>>>()
+        .map_err(Failed::from)
 }

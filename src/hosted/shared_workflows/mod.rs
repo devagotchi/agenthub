@@ -10,6 +10,7 @@ use crate::{SharedWorkflow, WorkflowBinding, actions};
 
 mod bindings;
 mod mutations;
+mod project;
 
 struct Entry {
     workflow: Workflow,
@@ -66,12 +67,21 @@ impl HostedBoard {
                     "shared workflows require an owner namespace",
                 )
             })?;
+        self.catalog_namespace(connection, &owner).await?;
+        let now = self.scope(connection).await?;
+        Ok((owner, now))
+    }
+
+    pub(in crate::hosted) async fn catalog_namespace(
+        &self,
+        connection: &mut AnyConnection,
+        owner: &str,
+    ) -> DbResult<()> {
         sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1))")
             .bind(format!("board_workflows:{}:{owner}", self.tenant))
             .execute(&mut *connection)
             .await?;
-        let now = self.scope(connection).await?;
-        Ok((owner, now))
+        Ok(())
     }
 
     async fn entry(
@@ -185,6 +195,11 @@ impl HostedBoard {
     async fn advance_workflow(&self, connection: &mut AnyConnection) -> DbResult<()> {
         sqlx::query("UPDATE board_settings SET version=version+1 WHERE tenant_id=$1 AND board_id=$2 AND key='workflow'")
             .bind(&self.tenant).bind(&self.project).execute(&mut *connection).await?;
+        sqlx::query("UPDATE board_projects SET version=version+1 WHERE tenant_id=$1 AND id=$2")
+            .bind(&self.tenant)
+            .bind(&self.project)
+            .execute(&mut *connection)
+            .await?;
         Ok(())
     }
 

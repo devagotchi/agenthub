@@ -7,8 +7,8 @@ use std::path::Path;
 use super::{board_changes, fixture, or_skip, quiet};
 use crate::{Actor, DepKind, NewTicket, Patch, ProjectSettings, Settings, TicketSource, actions};
 
-const SUBJECTS: [&str; 9] = [
-    "ticket", "lease", "note", "dep", "approval", "board", "issue", "wake", "workflow",
+const SUBJECTS: [&str; 10] = [
+    "ticket", "lease", "note", "dep", "approval", "board", "issue", "wake", "workflow", "project",
 ];
 
 #[test]

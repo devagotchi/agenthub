@@ -33,7 +33,7 @@ async fn on_its_own_every_table_is_a_board_table_with_its_own_history() {
             .fetch_all(&mut *connection)
             .await
             .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
 }
 
 #[tokio::test]
@@ -96,6 +96,57 @@ async fn shared_catalog_upgrade_keeps_existing_workflows_private_and_unchanged()
 }
 
 /// Opened again, nothing changes: every statement finds what it would make.
+#[tokio::test]
+async fn project_lifecycle_adopts_names_and_uniqueness_only_for_active_generations() {
+    let url = or_skip!(testing::empty_postgres());
+    testing::migrated_to(&url, &MIGRATIONS, 6).await;
+    let mut connection = <sqlx::AnyConnection as sqlx::Connection>::connect(&url)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO devagotchi.board_projects (tenant_id,id,source_hash,imported_at,owner_id,project_name) VALUES ($1,'old','native',1,'owner','project')")
+        .bind(crate::LOCAL_TENANT).execute(&mut connection).await.unwrap();
+    let store = devagotchi_store::Store::open(&url, &[&MIGRATIONS])
+        .await
+        .unwrap();
+    let adopted: (String, i64, Option<i64>) = sqlx::query_as(
+        "SELECT display_name,version,retired_at FROM devagotchi.board_projects WHERE id='old'",
+    )
+    .fetch_one(&mut connection)
+    .await
+    .unwrap();
+    assert_eq!(adopted, ("project".into(), 1, None));
+    let insert = "INSERT INTO devagotchi.board_projects (tenant_id,id,source_hash,imported_at,owner_id,project_name) VALUES ($1,'new','native',2,'owner','project')";
+    assert!(
+        sqlx::query(insert)
+            .bind(crate::LOCAL_TENANT)
+            .execute(&mut connection)
+            .await
+            .is_err()
+    );
+    sqlx::query("UPDATE devagotchi.board_projects SET retired_at=2 WHERE id='old'")
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    sqlx::query(insert)
+        .bind(crate::LOCAL_TENANT)
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    for migration in MIGRATIONS.iter() {
+        sqlx::raw_sql(sqlx::AssertSqlSafe(migration.sql.as_ref().to_string()))
+            .execute(&mut connection)
+            .await
+            .unwrap();
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM devagotchi.board_projects")
+        .fetch_one(&mut connection)
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+    drop(store);
+}
+
+/// Reapplying migrations preserves the initialized schema.
 #[tokio::test]
 async fn run_again_the_migrations_find_everything_made() {
     let test = or_skip!(testing::postgres_with(&[&MIGRATIONS]));

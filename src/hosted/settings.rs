@@ -102,6 +102,13 @@ impl HostedBoard {
         .bind(value)
         .execute(&mut *connection)
         .await?;
+        if key == "workflow" {
+            sqlx::query("UPDATE board_projects SET version=version+1 WHERE tenant_id=$1 AND id=$2")
+                .bind(&self.tenant)
+                .bind(&self.project)
+                .execute(&mut *connection)
+                .await?;
+        }
         Ok(())
     }
 
