@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use crate::{AnchorPatch, Anchors, TicketProvenance, TicketSource};
 
 /// Who is acting. Identity comes from the hub's authentication, never from a tool
-/// argument; `human` gates force-release; `wip_limit` overrides the board default.
+/// argument; `human` gates force-release. An explicit `wip_limit` is a principal's
+/// limit across this tenant's boards: the host must supply an authenticated `id`
+/// unique in that tenant. None keeps the board default for board-local seat aliases.
 #[derive(Debug, Clone)]
 pub struct Actor<'a> {
     pub id: &'a str,
