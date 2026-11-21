@@ -166,8 +166,9 @@ impl HostedBoard {
         )?)
     }
 
-    /// `wip_limit` when `actor` already holds as many live leases as its limit (its own, else
-    /// the board's default; 0 means none). Claim and claim-next both ask this.
+    /// Explicit principal limits count across boards; aliases without one use the board
+    /// default. SERIALIZABLE protects this predicate against concurrent claims on other
+    /// boards as well as this board's row lock. Claim and claim-next both ask this.
     async fn check_wip(
         &self,
         connection: &mut AnyConnection,
@@ -181,12 +182,14 @@ impl HostedBoard {
         }
         let held: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM board_tickets
-             WHERE tenant_id=$1 AND board_id=$2 AND holder=$3 AND lease_expires_at>$4",
+             WHERE tenant_id=$1 AND holder=$3 AND lease_expires_at>$4
+               AND ($5 OR board_id=$2)",
         )
         .bind(&self.tenant)
         .bind(&self.project)
         .bind(actor.id)
         .bind(now)
+        .bind(actor.wip_limit.is_some())
         .fetch_one(&mut *connection)
         .await?;
         if held >= limit {

@@ -116,6 +116,7 @@ mod hosted_lifecycle;
 mod inbox;
 mod lanes;
 mod operations;
+mod principal_workload;
 mod schema;
 mod search;
 mod shared_workflows;
