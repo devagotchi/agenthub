@@ -33,7 +33,7 @@ async fn on_its_own_every_table_is_a_board_table_with_its_own_history() {
             .fetch_all(&mut *connection)
             .await
             .unwrap();
-    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7]);
+    assert_eq!(versions, vec![1, 2, 3, 4, 5, 6, 7, 8]);
 }
 
 #[tokio::test]

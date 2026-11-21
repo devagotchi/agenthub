@@ -1,11 +1,12 @@
 -- Independent source policy families are applied once, never restoring operator edits.
-CREATE TABLE devagotchi.board_policy_seed_marks (
+CREATE TABLE IF NOT EXISTS devagotchi.board_policy_seed_marks (
   tenant_id TEXT NOT NULL,
   family TEXT NOT NULL,
   PRIMARY KEY (tenant_id, family)
 );
 ALTER TABLE devagotchi.board_policy_seed_marks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE devagotchi.board_policy_seed_marks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_only ON devagotchi.board_policy_seed_marks;
 CREATE POLICY tenant_only ON devagotchi.board_policy_seed_marks
   USING (tenant_id=current_setting('devagotchi.tenant',true))
   WITH CHECK (tenant_id=current_setting('devagotchi.tenant',true));
