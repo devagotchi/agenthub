@@ -6,6 +6,122 @@
 use devagotchi_contracts::BridgeResult;
 use devagotchi_store::{Store, transaction};
 
+/// Maximum claims in one roster page and boards in its authorized visibility set.
+pub const MAX_WORKLOAD_CLAIMS: usize = 100;
+pub const MAX_WORKLOAD_BOARDS: usize = 1000;
+
+/// A stable key within a principal's live claims, ordered by board then ticket id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaimCursor {
+    pub board_id: String,
+    pub ticket_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrincipalClaim {
+    pub cursor: ClaimCursor,
+    pub title: String,
+    pub lease_expires_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrincipalWorkload {
+    /// Database time, in milliseconds, shared by the total and visible claims.
+    pub as_of: i64,
+    /// All live claims for this identity in the tenant, including inaccessible boards.
+    pub total: i64,
+    pub claims: Vec<PrincipalClaim>,
+    /// The last returned claim, only when another visible claim exists in this snapshot.
+    pub next: Option<ClaimCursor>,
+}
+
+/// Read a verified principal's workload without revealing inaccessible board details.
+/// The host must authenticate `principal`, authorize disclosure of its total, and supply
+/// only board ids this viewer may read. A cursor never grants board access. Subsequent
+/// pages are fresh snapshots: claims can expire or move between requests.
+pub async fn principal_workload(
+    store: &Store,
+    tenant: &str,
+    principal: &str,
+    visible_boards: &[String],
+    after: Option<&ClaimCursor>,
+    limit: usize,
+) -> BridgeResult<PrincipalWorkload> {
+    if !devagotchi_store::valid_tenant_id(tenant)
+        || principal.is_empty()
+        || principal.len() > 256
+        || visible_boards.len() > MAX_WORKLOAD_BOARDS
+        || visible_boards
+            .iter()
+            .any(|id| id.is_empty() || id.len() > 256)
+        || !(1..=MAX_WORKLOAD_CLAIMS).contains(&limit)
+        || after.is_some_and(|key| {
+            key.board_id.is_empty()
+                || key.board_id.len() > 256
+                || key.ticket_id.is_empty()
+                || key.ticket_id.len() > 256
+        })
+    {
+        return Err(crate::invalid("invalid principal workload page bounds"));
+    }
+    let visible = serde_json::to_string(visible_boards).expect("string list json");
+    transaction!(store, |connection| {
+        store.scope(connection, tenant).await?;
+        let now = super::HostedBoard::server_now(connection).await?;
+        let total: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM board_tickets
+             WHERE tenant_id=$1 AND holder=$2 AND lease_expires_at>$3",
+        )
+        .bind(tenant)
+        .bind(principal)
+        .bind(now)
+        .fetch_one(&mut *connection)
+        .await?;
+        let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
+            "SELECT board_id,id,title,lease_expires_at FROM board_tickets
+             WHERE tenant_id=$1 AND holder=$2 AND lease_expires_at>$3
+               AND board_id IN (SELECT jsonb_array_elements_text($4::jsonb))
+               AND (board_id COLLATE \"C\",id COLLATE \"C\") > ($5,$6)
+             ORDER BY board_id COLLATE \"C\",id COLLATE \"C\" LIMIT $7",
+        )
+        .bind(tenant)
+        .bind(principal)
+        .bind(now)
+        .bind(&visible)
+        .bind(after.map_or("", |key| key.board_id.as_str()))
+        .bind(after.map_or("", |key| key.ticket_id.as_str()))
+        .bind((limit + 1) as i64)
+        .fetch_all(&mut *connection)
+        .await?;
+        let more = rows.len() > limit;
+        let claims: Vec<_> = rows
+            .into_iter()
+            .take(limit)
+            .map(
+                |(board_id, ticket_id, title, lease_expires_at)| PrincipalClaim {
+                    cursor: ClaimCursor {
+                        board_id,
+                        ticket_id,
+                    },
+                    title,
+                    lease_expires_at,
+                },
+            )
+            .collect();
+        let next = if more {
+            claims.last().map(|claim| claim.cursor.clone())
+        } else {
+            None
+        };
+        Ok(PrincipalWorkload {
+            as_of: now,
+            total,
+            claims,
+            next,
+        })
+    })
+}
+
 /// One board in a tenant, as `board_projects` holds it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BoardRow {

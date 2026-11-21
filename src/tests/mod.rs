@@ -124,6 +124,7 @@ mod sources;
 mod standalone;
 mod standing;
 mod updates;
+mod workload_reads;
 
 /// A new database on the test Postgres with AgentHub's tables, or `None` without one.
 pub(super) async fn postgres() -> Option<devagotchi_store::testing::TestStore> {
