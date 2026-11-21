@@ -1,6 +1,56 @@
 use super::*;
 
 impl HostedBoard {
+    /// Create an independent catalog definition without changing this board's binding.
+    /// The host must authorize the complete owner namespace, as for catalog edits.
+    pub async fn create_shared_workflow(
+        &self,
+        actor: &Actor<'_>,
+        workflow: &Workflow,
+    ) -> BridgeResult<SharedWorkflow> {
+        human(actor)?;
+        workflow.validate().map_err(invalid)?;
+        transaction!(&self.store, |connection| {
+            let (owner, now) = self.catalog_scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.workflows.put")
+                .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "create_shared_workflow")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
+            let inserted = sqlx::query(
+                "INSERT INTO board_workflows (tenant_id,owner_id,id,source_board,value)
+                 VALUES ($1,$2,$3,$4,$5) ON CONFLICT (tenant_id,owner_id,id) DO NOTHING",
+            )
+            .bind(&self.tenant)
+            .bind(&owner)
+            .bind(&workflow.id)
+            .bind(&self.project)
+            .bind(serde_json::to_string(workflow).expect("workflow json"))
+            .execute(&mut *connection)
+            .await?
+            .rows_affected();
+            if inserted != 1 {
+                return Err(fail("already_exists", "a shared workflow has that id").into());
+            }
+            self.event(
+                connection,
+                actor.id,
+                now,
+                actions::WORKFLOW_PUBLISHED,
+                None,
+                None,
+                serde_json::json!({"id":workflow.id,"version":1,"bound":false}),
+            )
+            .await?;
+            let entry = self.entry(connection, &owner, &workflow.id).await?;
+            let result = self.projection(connection, &owner, entry).await?;
+            receipt.complete(connection, result).await
+        })
+    }
+
     /// Edit one definition and every using board as one transaction. The host authorizes
     /// its entire owner namespace before calling this, not merely the originating board.
     pub async fn edit_shared_workflow(
