@@ -110,6 +110,7 @@ mod anchors;
 mod approvals;
 mod configuration;
 mod configuration_policy;
+mod configuration_receipts;
 mod create_dependencies;
 mod event_filters;
 mod held_updates;

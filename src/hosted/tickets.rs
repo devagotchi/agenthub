@@ -269,6 +269,13 @@ impl HostedBoard {
             let now = self.scope(connection).await?;
             let workflow: Workflow = self.configuration(connection, "workflow").await?;
             let current = self.ticket(connection, id, &workflow, now).await?;
+            let receipt: Receipt<(Ticket, String)> =
+                self.begin_mutation(connection, actor, "undo_close").await?;
+            if let Receipt::Replay((saved, action)) = receipt {
+                self.authorize(connection, actor, &action, &current.labels)
+                    .await?;
+                return Ok(saved);
+            }
             if current
                 .closed_at
                 .is_none_or(|closed| now >= closed + crate::UNDO_MS)
@@ -296,13 +303,9 @@ impl HostedBoard {
                 .into());
             }
             crate::check_transition(&workflow, &current, &to, actor.id)?;
-            self.authorize(
-                connection,
-                actor,
-                &format!("task.transition:{}->{to}", current.state),
-                &current.labels,
-            )
-            .await?;
+            let action = format!("task.transition:{}->{to}", current.state);
+            self.authorize(connection, actor, &action, &current.labels)
+                .await?;
             sqlx::query(
                 "UPDATE board_tickets SET state=$4,closed_at=NULL,version=version+1,updated_at=$5
                  WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
@@ -324,7 +327,11 @@ impl HostedBoard {
                 serde_json::json!({"from": current.state, "to": to, "undo": true}),
             )
             .await?;
-            self.ticket(connection, id, &workflow, now).await
+            let saved = self.ticket(connection, id, &workflow, now).await?;
+            receipt
+                .complete(connection, (saved, action))
+                .await
+                .map(|(ticket, _)| ticket)
         })
     }
 }

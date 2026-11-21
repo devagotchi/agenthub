@@ -29,10 +29,14 @@ impl HostedBoard {
             let now = self.scope(connection).await?;
             let workflow: Workflow = self.configuration(connection, "workflow").await?;
             let current = self.ticket(connection, id, &workflow, now).await?;
-            unheld_edit(&current, version)?;
             self.authorize(connection, actor, "task.edit", &current.labels)
                 .await?;
             self.recipient(connection, actor, to).await?;
+            let receipt = self.begin_mutation(connection, actor, "delegate").await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
+            unheld_edit(&current, version)?;
             sqlx::query(
                 "UPDATE board_tickets SET assignee=$4,version=version+1,updated_at=$5
                  WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
@@ -57,7 +61,8 @@ impl HostedBoard {
                 serde_json::json!({"assignee": to, "note_seq": note.seq}),
             )
             .await?;
-            self.ticket(connection, id, &workflow, now).await
+            let saved = self.ticket(connection, id, &workflow, now).await?;
+            receipt.complete(connection, saved).await
         })
     }
 }

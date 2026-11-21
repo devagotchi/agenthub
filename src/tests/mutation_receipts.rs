@@ -2,6 +2,81 @@ use super::*;
 use serde_json::json;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn delegation_and_undo_replay_without_restoring_old_assignment_or_reopening_again() {
+    let f = or_skip!(fixture());
+    let owner = Actor::human("owner");
+    let id = f.new_ticket(&owner, "Delegate and undo");
+    let input = json!({"id":id,"version":1,"to":"codex","note":"Review this"});
+    let board = f
+        .board
+        .requested("owner", "delegate", "delegate", &input)
+        .unwrap();
+    let saved = board
+        .delegate(&owner, &id, 1, "codex", "Review this")
+        .unwrap();
+    assert_eq!(
+        board
+            .delegate(&owner, &id, 1, "codex", "Review this")
+            .unwrap(),
+        saved
+    );
+    assert_eq!(f.board.get(&id).unwrap().notes.len(), 1);
+    let closed = f
+        .board
+        .update(
+            &owner,
+            &id,
+            saved.version,
+            Patch {
+                state: Some("cancelled".into()),
+                assignee: Some(None),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        board
+            .delegate(&owner, &id, 1, "codex", "Review this")
+            .unwrap(),
+        saved
+    );
+    assert!(f.board.get(&id).unwrap().ticket.assignee.is_none());
+    let input = json!({"id":id,"version":closed.version,"from":"ready"});
+    let undo = f
+        .board
+        .requested("owner", "undo", "undo_close", &input)
+        .unwrap();
+    let reopened = undo
+        .undo_close(&owner, &id, closed.version, "ready")
+        .unwrap();
+    assert_eq!(
+        undo.undo_close(&owner, &id, closed.version, "ready")
+            .unwrap(),
+        reopened
+    );
+    let closed_again = f
+        .board
+        .update(
+            &owner,
+            &id,
+            reopened.version,
+            Patch {
+                state: Some("cancelled".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let events = f.board.events(0, 100).unwrap().len();
+    assert_eq!(
+        undo.undo_close(&owner, &id, closed.version, "ready")
+            .unwrap(),
+        reopened
+    );
+    assert_eq!(f.board.get(&id).unwrap().ticket, closed_again);
+    assert_eq!(f.board.events(0, 100).unwrap().len(), events);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn update_replay_keeps_original_transition_and_rechecks_its_current_policy() {
     use crate::policy::{Effect, Identity, Rule, Selector, Subject, catalog};
     let f = or_skip!(fixture());

@@ -19,10 +19,33 @@ impl HostedBoard {
             let (owner, now) = self.catalog_scope(connection).await?;
             self.authorize_configuration(connection, actor, "admin.workflows.put")
                 .await?;
+            let receipt: Receipt<SharedWorkflow> = self
+                .begin_mutation(connection, actor, "edit_shared_workflow")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                let mut names = saved.used_by.clone();
+                names.extend(
+                    self.uses(connection, &owner, id)
+                        .await?
+                        .into_iter()
+                        .map(|(_, name)| name),
+                );
+                names.sort();
+                names.dedup();
+                for name in names {
+                    let mut board = self.clone();
+                    board.name = name;
+                    board
+                        .authorize_configuration(connection, actor, "admin.workflows.put")
+                        .await?;
+                }
+                return Ok(saved);
+            }
             let entry = self.entry(connection, &owner, id).await?;
             expected(entry.version, version)?;
             if &entry.workflow == workflow {
-                return self.projection(connection, &owner, entry).await;
+                let result = self.projection(connection, &owner, entry).await?;
+                return receipt.complete(connection, result).await;
             }
             let uses = self.uses(connection, &owner, id).await?;
             let mut boards = Vec::new();
@@ -57,7 +80,8 @@ impl HostedBoard {
             self.catalog_event(connection, &entry.source, actor, now, actions::WORKFLOW_EDITED,
                 serde_json::json!({"id":id,"version":version+1,"boards":uses.into_iter().map(|(_,name)| name).collect::<Vec<_>>()})).await?;
             let entry = self.entry(connection, &owner, id).await?;
-            self.projection(connection, &owner, entry).await
+            let result = self.projection(connection, &owner, entry).await?;
+            receipt.complete(connection, result).await
         })
     }
 
@@ -73,6 +97,12 @@ impl HostedBoard {
             let (owner, now) = self.catalog_scope(connection).await?;
             self.authorize_configuration(connection, actor, "admin.workflows.delete")
                 .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "delete_shared_workflow")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             let entry = self.entry(connection, &owner, id).await?;
             expected(entry.version, version)?;
             if !self.uses(connection, &owner, id).await?.is_empty() {
@@ -97,7 +127,7 @@ impl HostedBoard {
                 serde_json::json!({"id":id,"version":version}),
             )
             .await?;
-            Ok(())
+            receipt.complete(connection, ()).await
         })
     }
 }

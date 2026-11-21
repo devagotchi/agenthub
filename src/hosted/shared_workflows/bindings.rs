@@ -18,6 +18,12 @@ impl HostedBoard {
             let (owner, now) = self.catalog_scope(connection).await?;
             self.authorize_configuration(connection, actor, "admin.workflows.put")
                 .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "publish_workflow")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             self.expected_configuration(connection, "workflow", board_version)
                 .await?;
             if self.workflow_binding_in(connection).await?.is_some() {
@@ -58,7 +64,8 @@ impl HostedBoard {
             )
             .await?;
             let entry = self.entry(connection, &owner, id).await?;
-            self.projection(connection, &owner, entry).await
+            let result = self.projection(connection, &owner, entry).await?;
+            receipt.complete(connection, result).await
         })
     }
 
@@ -100,6 +107,12 @@ impl HostedBoard {
             let (owner, now) = self.catalog_scope(connection).await?;
             self.authorize_configuration(connection, actor, "admin.workflows.put")
                 .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "bind_workflow")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             self.expected_configuration(connection, "workflow", board_version)
                 .await?;
             let entry = self.entry(connection, &owner, id).await?;
@@ -113,7 +126,8 @@ impl HostedBoard {
                     .await?;
                 self.bind_in(connection, &owner, id, actor, now).await?;
             }
-            self.configuration_state_in(connection).await
+            let result = self.configuration_state_in(connection).await?;
+            receipt.complete(connection, result).await
         })
     }
 
@@ -128,6 +142,12 @@ impl HostedBoard {
             let (_, now) = self.catalog_scope(connection).await?;
             self.authorize_configuration(connection, actor, "admin.workflows.put")
                 .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "detach_workflow")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             self.expected_configuration(connection, "workflow", board_version)
                 .await?;
             if let Some(binding) = self.workflow_binding_in(connection).await? {
@@ -152,7 +172,8 @@ impl HostedBoard {
                 )
                 .await?;
             }
-            self.configuration_state_in(connection).await
+            let result = self.configuration_state_in(connection).await?;
+            receipt.complete(connection, result).await
         })
     }
 }
