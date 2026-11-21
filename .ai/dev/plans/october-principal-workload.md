@@ -40,6 +40,8 @@ final binary build, Windows process E2E, protocol, contracts, AI/fmt/layout/diff
 Dependency manifests/lockfile are unchanged from the passing audit. An initial test-temp
 location inside the checkout was correctly refused by the AI-state tests; rerun uses D:
 outside the checkout. A stale migration-history assertion was updated to include version5.
-Those failed runs are retained and excluded from passing evidence. Backend Linux PostgreSQL
-CI still must pass. Push/PR/main: pending. Host credential/profile integration is separate.
-DELIVERY INCOMPLETE.
+Those failed runs are retained and excluded from passing evidence. Backend PostgreSQL CI
+44847243719 passed on 32d94d3; PR15 merged as 97c84f2 after green checks. The reviewed
+tree matches main, and the local/remote feature branch was deleted. Main CI44847522976
+also passed. This backend prerequisite is delivered; host credential/profile integration
+and adoption remain separate. The oldest historical source remains incomplete and preserved.
