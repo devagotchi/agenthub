@@ -127,6 +127,7 @@ mod principal_workload;
 mod runtime_settings;
 mod schema;
 mod search;
+mod selection;
 mod shared_workflows;
 mod sources;
 mod standalone;

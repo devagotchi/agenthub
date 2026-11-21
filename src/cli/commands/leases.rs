@@ -19,8 +19,11 @@ pub(super) fn claim(c: Command<'_, '_>) -> CommandResult {
     let lease = match arg(parsed, 0) {
         Some(id) => with_id(id, board.claim(actor, id, ttl))?,
         None => {
+            let mut labels = parsed.flag_all("--label");
+            labels.pop(); // The last value stays in the original singular field for retry stability.
             let filter = NextFilter {
                 label: parsed.flag("--label").map(str::to_string),
+                labels,
                 states: parsed.flag_all("--state"),
                 parent: parsed.flag("--parent").map(str::to_string),
                 ttl_ms: ttl,

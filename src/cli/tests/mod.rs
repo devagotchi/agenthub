@@ -74,6 +74,7 @@ mod held_updates;
 mod receipt_transport;
 mod retries;
 mod search;
+mod selection;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn board_settings_names_the_repo_and_environments_of_a_local_board() {

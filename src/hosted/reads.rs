@@ -69,6 +69,7 @@ impl HostedBoard {
         now: i64,
         filter: &Filter,
         ready_for: Option<&str>,
+        selection: Option<&crate::NextFilter>,
     ) -> DbResult<Vec<Ticket>> {
         let text = filter
             .text
@@ -85,6 +86,17 @@ impl HostedBoard {
                     .replace('_', "\\_")
             )
         });
+        let states =
+            serde_json::to_string(&selection.map(|s| s.states.as_slice()).unwrap_or_default())
+                .expect("states JSON");
+        let labels = selection
+            .map(|s| {
+                let mut labels = s.labels.clone();
+                labels.extend(s.label.iter().cloned());
+                crate::ticket::clean_labels(&labels)
+            })
+            .unwrap_or_default();
+        let labels = serde_json::to_string(&labels).expect("labels JSON");
         let ids: Vec<String> = sqlx::query_scalar(
             "SELECT id FROM board_tickets
              WHERE tenant_id=$1 AND board_id=$2
@@ -107,13 +119,15 @@ impl HostedBoard {
                AND ($13::text IS NULL OR agent=$13)
                AND ($14::text IS NULL OR session=$14)
                AND ($15::text IS NULL OR fingerprint=$15)
-             ORDER BY (assignee IS NOT NULL) DESC,priority,created_at,id COLLATE \"C\"",
+               AND ($18::jsonb = '[]'::jsonb OR jsonb_exists($18::jsonb,state))
+               AND labels::jsonb @> $19::jsonb
+             ORDER BY ($20::boolean AND assignee IS NOT NULL) DESC,priority,created_at,id COLLATE \"C\"",
         ).bind(&self.tenant).bind(&self.project).bind(&filter.state).bind(&filter.holder)
             .bind(&filter.assignee).bind(&filter.parent).bind(&filter.kind).bind(&filter.label).bind(pattern)
             .bind(clean_anchor(&filter.anchors.machine)).bind(clean_anchor(&filter.anchors.repo))
             .bind(clean_anchor(&filter.anchors.environment)).bind(clean_anchor(&filter.anchors.agent))
             .bind(clean_anchor(&filter.anchors.session)).bind(clean_anchor(&filter.anchors.fingerprint))
-            .bind(text).bind(web_search)
+            .bind(text).bind(web_search).bind(states).bind(labels).bind(ready_for.is_some())
             .fetch_all(&mut *connection).await?;
         let mut tickets = Vec::new();
         let limit = filter.limit.unwrap_or(200).max(1);
@@ -162,7 +176,8 @@ impl HostedBoard {
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
             let workflow = self.configuration(connection, "workflow").await?;
-            self.list_in(connection, &workflow, now, filter, None).await
+            self.list_in(connection, &workflow, now, filter, None, None)
+                .await
         })
     }
 
@@ -180,6 +195,7 @@ impl HostedBoard {
                     ..Default::default()
                 },
                 Some(actor.id),
+                None,
             )
             .await
         })

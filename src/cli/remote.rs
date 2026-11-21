@@ -257,6 +257,7 @@ impl Face for Remote {
             json!({
                 "ttl_ms": filter.ttl_ms,
                 "label": filter.label,
+                "labels": filter.labels,
                 "states": filter.states,
                 "parent": filter.parent,
             }),

@@ -24,6 +24,8 @@ pub struct Lease {
 #[derive(Debug, Clone, Default)]
 pub struct NextFilter {
     pub label: Option<String>,
+    /// All of these labels must be present, together with the singular label if given.
+    pub labels: Vec<String>,
     pub states: Vec<String>,
     pub parent: Option<String>,
     pub ttl_ms: Option<i64>,

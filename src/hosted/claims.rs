@@ -195,13 +195,19 @@ impl HostedBoard {
             }
             self.check_wip(connection, actor, &settings, now).await?;
             let list = Filter {
-                label: filter.label.clone(),
                 parent: filter.parent.clone(),
                 limit: Some(25),
                 ..Default::default()
             };
             let candidates = self
-                .list_in(connection, &workflow, now, &list, Some(actor.id))
+                .list_in(
+                    connection,
+                    &workflow,
+                    now,
+                    &list,
+                    Some(actor.id),
+                    Some(filter),
+                )
                 .await?;
             for mut ticket in candidates {
                 if !filter.states.is_empty() && !filter.states.contains(&ticket.state) {
