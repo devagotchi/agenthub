@@ -116,7 +116,30 @@ async fn board_runtime_settings_reject_invalid_values_without_writes() {
     let mut old = serde_json::to_value(&initial.settings).unwrap();
     old.as_object_mut().unwrap().remove("heartbeat_hint_ms");
     old.as_object_mut().unwrap().remove("note_kinds");
+    old.as_object_mut().unwrap().remove("priority_labels");
     let old: Settings = serde_json::from_value(old).unwrap();
     assert_eq!(old.heartbeat_every_ms(900_000), 300_000);
     assert!(old.check_note_kind("old-custom-type").is_ok());
+    assert_eq!(old.priority_label(2), "P2");
+}
+
+#[test]
+fn priority_labels_are_bounded_display_data_with_numeric_fallbacks() {
+    let mut settings = Settings::default();
+    assert_eq!(settings.priority_label(0), "P0 urgent");
+    settings.priority_labels = Some(vec!["Urgent <work>".into(), "Next".into()]);
+    assert_eq!(settings.priority_label(0), "Urgent <work>");
+    assert_eq!(settings.priority_label(1), "Next");
+    assert_eq!(settings.priority_label(2), "P2");
+    assert_eq!(settings.priority_label(-1), "P-1");
+    assert_eq!(settings.priority_label(i64::MAX), format!("P{}", i64::MAX));
+    for labels in [
+        vec!["".into()],
+        vec!["control\ncharacter".into()],
+        vec!["x".repeat(81)],
+        vec!["ok".into(); 33],
+    ] {
+        assert!(crate::settings::check_priority_labels(Some(&labels)).is_err());
+    }
+    assert!(crate::settings::check_priority_labels(Some(&[])).is_ok());
 }

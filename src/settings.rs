@@ -37,6 +37,9 @@ pub struct Settings {
     /// An absent or empty list permits any note kind; internal lease notes are unaffected.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note_kinds: Option<Vec<String>>,
+    /// Display labels indexed by numeric priority; missing entries keep the P<number> label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority_labels: Option<Vec<String>>,
     /// The project's repository URL, named once; tickets pick it up.
     #[serde(default)]
     pub repo: Option<String>,
@@ -81,6 +84,8 @@ pub struct SettingsEdit {
     pub heartbeat_hint_ms: Option<i64>,
     #[serde(default)]
     pub note_kinds: Option<Vec<String>>,
+    #[serde(default)]
+    pub priority_labels: Option<Vec<String>>,
     pub repo: Option<String>,
     pub environments: Vec<String>,
 }
@@ -96,6 +101,7 @@ impl From<&Settings> for SettingsEdit {
             default_priority: s.default_priority,
             heartbeat_hint_ms: s.heartbeat_hint_ms,
             note_kinds: s.note_kinds.clone(),
+            priority_labels: s.priority_labels.clone(),
             repo: s.repo.clone(),
             environments: s.environments.clone(),
         }
@@ -126,6 +132,7 @@ impl SettingsEdit {
             .transpose()?;
         let environments = check_environments(&self.environments)?;
         check_note_settings(self.heartbeat_hint_ms, self.note_kinds.as_deref())?;
+        check_priority_labels(self.priority_labels.as_deref())?;
         Ok(Settings {
             lease_ttl_ms: self.lease_ttl_ms,
             lease_min_ttl_ms: self.lease_min_ttl_ms,
@@ -135,6 +142,7 @@ impl SettingsEdit {
             default_priority: self.default_priority,
             heartbeat_hint_ms: self.heartbeat_hint_ms,
             note_kinds: self.note_kinds.clone(),
+            priority_labels: self.priority_labels.clone(),
             repo,
             environments,
             standing: current.standing.clone(),
@@ -211,6 +219,11 @@ impl Default for Settings {
             wip_limit_default: 2,
             default_priority: 2,
             heartbeat_hint_ms: Some(Self::DEFAULT_HEARTBEAT_HINT_MS),
+            priority_labels: Some(
+                ["P0 urgent", "P1 high", "P2 normal", "P3 low", "P4 someday"]
+                    .map(String::from)
+                    .to_vec(),
+            ),
             note_kinds: Some(
                 [
                     "note", "handoff", "blocker", "decision", "summary", "review", "question",
@@ -247,6 +260,14 @@ pub(crate) fn check_note_settings(hint: Option<i64>, kinds: Option<&[String]>) -
 impl Settings {
     pub const DEFAULT_HEARTBEAT_HINT_MS: i64 = 300_000;
 
+    pub fn priority_label(&self, priority: i64) -> String {
+        usize::try_from(priority)
+            .ok()
+            .and_then(|index| self.priority_labels.as_ref()?.get(index))
+            .cloned()
+            .unwrap_or_else(|| format!("P{priority}"))
+    }
+
     pub fn heartbeat_every_ms(&self, ttl_ms: i64) -> i64 {
         self.heartbeat_hint_ms
             .unwrap_or(Self::DEFAULT_HEARTBEAT_HINT_MS)
@@ -266,4 +287,20 @@ impl Settings {
         }
         Ok(())
     }
+}
+
+pub(crate) fn check_priority_labels(labels: Option<&[String]>) -> BridgeResult<()> {
+    if let Some(labels) = labels
+        && (labels.len() > 32
+            || labels.iter().any(|label| {
+                label.trim().is_empty()
+                    || label.chars().count() > 80
+                    || label.chars().any(char::is_control)
+            }))
+    {
+        return Err(crate::invalid(
+            "choose at most 32 priority labels, each 1 to 80 printable characters",
+        ));
+    }
+    Ok(())
 }
