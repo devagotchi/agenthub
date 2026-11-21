@@ -49,6 +49,17 @@ impl HostedBoard {
         directory
             .authorize_request(connection, &self.tenant, principal, actor)
             .await?;
+        self.access_lease_in(connection, principal, ticket, fence, now)
+            .await
+    }
+    async fn access_lease_in(
+        &self,
+        connection: &mut AnyConnection,
+        principal: &str,
+        ticket: &str,
+        fence: i64,
+        now: i64,
+    ) -> DbResult<TaskLeaseBinding> {
         let workflow: Workflow = self.configuration(connection, "workflow").await?;
         let task = self.ticket(connection, ticket, &workflow, now).await?;
         crate::lease::check_held(&task, principal, Some(fence))?;
@@ -99,6 +110,40 @@ impl HostedBoard {
         }
         let current = self
             .bind_access_task_in(connection, principal, actor, &binding.ticket, binding.fence)
+            .await?;
+        if current.lease_id != binding.lease_id {
+            return Err(fail("stale_fence", "task access lease identity changed").into());
+        }
+        Ok(current)
+    }
+
+    /// Reaper-only lease evidence. This does not authenticate a caller or grant access;
+    /// the host separately checks the stored principal's current identity. It takes the
+    /// board lock before the host's policy/machine/access locks and preserves DB errors.
+    pub async fn check_access_lease_in(
+        &self,
+        connection: &mut AnyConnection,
+        binding: &TaskLeaseBinding,
+    ) -> DbResult<TaskLeaseBinding> {
+        if binding.tenant != self.tenant
+            || binding.project != self.name
+            || binding.board != self.project
+        {
+            return Err(fail(
+                "not_granted",
+                "task access belongs to another board generation",
+            )
+            .into());
+        }
+        let now = self.scope(connection).await?;
+        let current = self
+            .access_lease_in(
+                connection,
+                &binding.principal,
+                &binding.ticket,
+                binding.fence,
+                now,
+            )
             .await?;
         if current.lease_id != binding.lease_id {
             return Err(fail("stale_fence", "task access lease identity changed").into());
