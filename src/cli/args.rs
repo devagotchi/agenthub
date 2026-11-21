@@ -25,7 +25,7 @@ pub const USAGE: &str = "Usage: devagotchi board <command> [options]
   handoff   ID NOTE [--to ID] [--fence N]
   release   ID [REASON] [--fence N]
   force     ID REASON              a person takes a lease away
-  set       ID --version V [--title T] [--desc D] [--priority N] [--state S] [--assign ID|-] [ANCHORS]   an anchor of \"\" clears it
+  set       ID --version V [--fence N] [--progress JSON] [--title T] [--desc D] [--priority N] [--state S] [--assign ID|-] [ANCHORS]   an anchor of \"\" clears it
   dep       ID --on ID [--kind blocks|parent|related|discovered-from|duplicates|supersedes] [--remove]
   reap                             expire lapsed leases
   verify                           recompute the event chain

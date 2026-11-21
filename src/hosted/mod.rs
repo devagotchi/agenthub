@@ -16,6 +16,7 @@ use super::{
 use devagotchi_store::{Failed, Store, transaction};
 
 mod approvals;
+mod edits;
 mod events;
 mod graph;
 mod inbox;

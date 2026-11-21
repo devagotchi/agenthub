@@ -259,6 +259,10 @@ pub(crate) fn one() -> i64 {
 
 #[derive(Debug, Clone, Default)]
 pub struct Patch {
+    /// The current fence is required while the caller holds a live lease.
+    pub fence: Option<i64>,
+    /// Replace the progress shown to watchers without extending the lease.
+    pub progress: Option<serde_json::Value>,
     pub title: Option<String>,
     pub description: Option<String>,
     pub priority: Option<i64>,

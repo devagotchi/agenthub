@@ -60,6 +60,7 @@ fn json(text: &str) -> serde_json::Value {
     serde_json::from_str(text.lines().next().unwrap_or("")).expect("one json line")
 }
 
+mod held_updates;
 mod search;
 
 #[tokio::test(flavor = "multi_thread")]

@@ -24,6 +24,10 @@ impl HostedBoard {
     /// Replace the settings whole. Settings equal to the board's write nothing; otherwise
     /// `board.settings_replaced` names the top-level keys that changed.
     pub async fn put_settings(&self, actor: &Actor<'_>, settings: &Settings) -> BridgeResult<()> {
+        crate::settings::check_note_settings(
+            settings.heartbeat_hint_ms,
+            settings.note_kinds.as_deref(),
+        )?;
         if settings.lease_min_ttl_ms <= 0
             || settings.lease_max_ttl_ms < settings.lease_min_ttl_ms
             || settings.lease_ttl_ms < settings.lease_min_ttl_ms

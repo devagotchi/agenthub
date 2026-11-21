@@ -46,6 +46,7 @@ pub(super) fn set(c: Command<'_, '_>) -> CommandResult {
         parsed,
         board,
         actor,
+        cache,
         output,
         ..
     } = c;
@@ -55,6 +56,16 @@ pub(super) fn set(c: Command<'_, '_>) -> CommandResult {
         .map_err(usage_error)?
         .ok_or_else(|| usage_error("--version V is required (board show ID --json)"))?;
     let patch = Patch {
+        fence: parsed
+            .int("--fence")
+            .map_err(usage_error)?
+            .or_else(|| cache.claims.get(id).map(|claim| claim.fence)),
+        progress: parsed
+            .flag("--progress")
+            .map(|raw| {
+                serde_json::from_str(raw).map_err(|_| usage_error("--progress must be JSON"))
+            })
+            .transpose()?,
         title: parsed.flag("--title").map(str::to_string),
         description: parsed.flag("--desc").map(str::to_string),
         priority: parsed.int("--priority").map_err(usage_error)?,

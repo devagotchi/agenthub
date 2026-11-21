@@ -1,6 +1,7 @@
 //! Making and changing a ticket: the welcome ticket, create (with its import source, once
 //! per board), update, delegate and undo-close. Reading one whole is `reads.rs`.
 
+use super::edits::{unheld_edit, update_fence};
 use super::*;
 use crate::chain::actions;
 use crate::{Patch, TicketProvenance, TicketSource, provenance::request_digest};
@@ -253,6 +254,10 @@ impl HostedBoard {
             unheld_edit(&current, version)?;
             let mut changed = serde_json::Map::new();
             let mut ticket = current.clone();
+            if let Some(progress) = &patch.progress {
+                ticket.progress = Some(progress.clone());
+                changed.insert("progress".into(), true.into());
+            }
             if let Some(title) = &patch.title {
                 let title = title.trim();
                 if title.is_empty() || title.chars().count() > 300 {
@@ -314,19 +319,21 @@ impl HostedBoard {
                 changed.insert("from".into(), serde_json::json!(current.state));
                 changed.insert("to".into(), serde_json::json!(to));
             }
+            update_fence(&current, actor, patch.fence)?;
             if changed.is_empty() {
                 return Ok(current);
             }
             sqlx::query(
                 "UPDATE board_tickets SET title=$4,description=$5,priority=$6,labels=$7,assignee=$8,
                  machine=$9,repo=$10,environment=$11,agent=$12,session=$13,fingerprint=$14,occurrences=$15,
-                 last_seen_at=$16,state=$17,closed_at=$18,version=version+1,updated_at=$19
+                 last_seen_at=$16,state=$17,closed_at=$18,version=version+1,updated_at=$19,progress=$20
                  WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
             ).bind(&self.tenant).bind(&self.project).bind(id).bind(&ticket.title).bind(&ticket.description)
                 .bind(ticket.priority).bind(serde_json::to_string(&ticket.labels).expect("labels json"))
                 .bind(&ticket.assignee).bind(&ticket.machine).bind(&ticket.repo).bind(&ticket.environment)
                 .bind(&ticket.agent).bind(&ticket.session).bind(&ticket.fingerprint).bind(ticket.occurrences)
                 .bind(ticket.last_seen_at).bind(&ticket.state).bind(ticket.closed_at).bind(now)
+                .bind(ticket.progress.as_ref().map(serde_json::Value::to_string))
                 .execute(&mut *connection).await?;
             self.event(
                 connection,
@@ -334,7 +341,7 @@ impl HostedBoard {
                 now,
                 actions::TICKET_UPDATED,
                 Some(id),
-                None,
+                patch.fence,
                 changed.into(),
             )
             .await?;
@@ -351,6 +358,12 @@ impl HostedBoard {
         to: &str,
         note: &str,
     ) -> BridgeResult<Ticket> {
+        if !actor.human {
+            return Err(fail(
+                "humans_only",
+                "delegation needs a person; a worker uses handoff with its lease fence",
+            ));
+        }
         let to = to.trim();
         if !crate::valid_name(to) {
             return Err(invalid(format!(
@@ -459,25 +472,4 @@ impl HostedBoard {
             self.ticket(connection, id, &workflow, now).await
         })
     }
-}
-
-/// An edit to a ticket nobody needs to hold: refused for an approval (only a decision moves
-/// it) and when `version` is not current.
-fn unheld_edit(current: &Ticket, version: i64) -> BridgeResult<()> {
-    if current.kind == crate::approval::KIND {
-        return Err(fail(
-            "approval_decide_only",
-            "an approval changes only through a person's decision",
-        ));
-    }
-    if current.version != version {
-        return Err(fail(
-            "version_conflict",
-            format!(
-                "version {version} is not current ({}); re-read and retry",
-                current.version
-            ),
-        ));
-    }
-    Ok(())
 }

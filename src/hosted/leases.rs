@@ -4,6 +4,7 @@
 use super::*;
 use crate::Filter;
 use crate::chain::actions;
+use crate::lease::projection as lease;
 
 impl HostedBoard {
     #[allow(clippy::too_many_arguments)]
@@ -255,7 +256,7 @@ impl HostedBoard {
             let to = workflow
                 .lane_by_active(&ticket.state)
                 .map(|lane| lane.complete_to.clone())
-                .unwrap_or_else(|| workflow.initial_state.clone());
+                .ok_or_else(|| fail("not_completable", "this state has no active work stage; repair the workflow before completing"))?;
             if !summary.trim().is_empty() {
                 self.insert_note(
                     connection,
@@ -403,12 +404,13 @@ impl HostedBoard {
             )
             .await?;
             sqlx::query(
-                "UPDATE board_tickets SET assignee=$4 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
+                "UPDATE board_tickets SET assignee=$4,last_worker=$5 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
             )
             .bind(&self.tenant)
             .bind(&self.project)
             .bind(id)
             .bind(to)
+            .bind(actor.id)
             .execute(&mut *connection)
             .await?;
             self.clear_lease(
@@ -444,6 +446,21 @@ impl HostedBoard {
             if ticket.holder.is_none() {
                 return Err(fail("not_held", format!("{id} is not held")).into());
             }
+            self.insert_note(
+                connection,
+                actor.id,
+                now,
+                id,
+                "note",
+                &format!(
+                    "Force-released from {}: {}",
+                    ticket.holder.as_deref().unwrap_or_default(),
+                    reason.trim()
+                ),
+                None,
+                None,
+            )
+            .await?;
             self.clear_lease(connection,actor.id,now,&ticket,&crate::lease::release_state(&workflow,&ticket),
                 actions::TICKET_FORCE_RELEASED,serde_json::json!({"previous_holder":ticket.holder,"previous_fence":ticket.fence,"reason":reason.trim()})).await?;
             self.ticket(connection, id, &workflow, now).await
@@ -475,21 +492,4 @@ impl HostedBoard {
             ).bind(&self.tenant).bind(&self.project).fetch_one(&mut *connection).await?)
         })
     }
-}
-
-fn lease(ticket: Ticket, settings: &Settings, already_held: bool) -> BridgeResult<Lease> {
-    let ttl = ticket.lease_ttl_ms.unwrap_or(settings.lease_ttl_ms);
-    Ok(Lease {
-        fence: ticket.fence,
-        lease_id: ticket
-            .lease_id
-            .clone()
-            .ok_or_else(|| fail("board_damaged", "held ticket has no lease ID"))?,
-        lease_expires_at: ticket
-            .lease_expires_at
-            .ok_or_else(|| fail("board_damaged", "held ticket has no lease expiry"))?,
-        heartbeat_every_ms: crate::lease::beat_every(ttl),
-        already_held,
-        ticket,
-    })
 }

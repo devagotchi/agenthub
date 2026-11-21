@@ -256,27 +256,34 @@ impl Face for Remote {
             Some(None) => (None, true),
             None => (None, false),
         };
-        self.call(
-            "board_update",
-            json!({
-                "id": id,
-                "version": version,
-                "title": patch.title,
-                "description": patch.description,
-                "priority": patch.priority,
-                "labels": patch.labels,
-                "assignee": assignee,
-                "clear_assignee": clear_assignee,
-                "state": patch.state,
-                // A cleared anchor travels as "", which the hub clears.
-                "machine": patch.anchors.machine.map(Option::unwrap_or_default),
-                "repo": patch.anchors.repo.map(Option::unwrap_or_default),
-                "environment": patch.anchors.environment.map(Option::unwrap_or_default),
-                "agent": patch.anchors.agent.map(Option::unwrap_or_default),
-                "session": patch.anchors.session.map(Option::unwrap_or_default),
-                "fingerprint": patch.anchors.fingerprint.map(Option::unwrap_or_default),
-            }),
-        )
+        let has_progress = patch.progress.is_some();
+        let mut arguments = json!({
+            "id": id,
+            "version": version,
+            "fence": patch.fence,
+            "progress": patch.progress,
+            "title": patch.title,
+            "description": patch.description,
+            "priority": patch.priority,
+            "labels": patch.labels,
+            "assignee": assignee,
+            "clear_assignee": clear_assignee,
+            "state": patch.state,
+            // A cleared anchor travels as "", which the hub clears.
+            "machine": patch.anchors.machine.map(Option::unwrap_or_default),
+            "repo": patch.anchors.repo.map(Option::unwrap_or_default),
+            "environment": patch.anchors.environment.map(Option::unwrap_or_default),
+            "agent": patch.anchors.agent.map(Option::unwrap_or_default),
+            "session": patch.anchors.session.map(Option::unwrap_or_default),
+            "fingerprint": patch.anchors.fingerprint.map(Option::unwrap_or_default),
+        });
+        if !has_progress {
+            arguments
+                .as_object_mut()
+                .expect("update object")
+                .remove("progress");
+        }
+        self.call("board_update", arguments)
     }
 
     fn add_dep(

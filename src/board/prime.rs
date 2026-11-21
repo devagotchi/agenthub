@@ -116,7 +116,7 @@ impl Board {
             ready: ready.iter().map(summary).collect(),
             attention: attention.iter().map(summary).collect(),
             notes_to_me,
-            heartbeat_every_ms: settings.lease_ttl_ms / 3,
+            heartbeat_every_ms: settings.heartbeat_every_ms(settings.lease_ttl_ms),
             protocol: PROTOCOL_LINE.to_string(),
         })
     }

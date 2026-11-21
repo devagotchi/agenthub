@@ -20,7 +20,7 @@ pub(super) fn exit_code_for(code: &str) -> u8 {
         "stale_fence" | "version_conflict" | "held_by_other" | "lease_expired" | "not_holder"
         | "wip_limit" | "blocked" | "distinct_required" | "dependency_cycle" | "not_held"
         | "source_conflict" | "parent_closed" | "request_conflict" | "already_exists"
-        | "in_use" | "shared_workflow" => EXIT_CONFLICT,
+        | "in_use" | "shared_workflow" | "not_completable" => EXIT_CONFLICT,
         "not_found" => EXIT_NOT_FOUND,
         "board_store" | "board_random" | "board_id" | "no_board" | "no_storage"
         | "board_runtime" | "board_io" | "hub_unreachable" | "hub_error" => EXIT_UNAVAILABLE,
@@ -60,6 +60,9 @@ pub(super) fn next_for(code: &str, id: Option<&str>) -> String {
         "distinct_required" => "someone else must take this lane; leave it for them".into(),
         "not_claimable" => format!(
             "board show {id} — only a lane queue is claimable; a person moves it with board set"
+        ),
+        "not_completable" => format!(
+            "board show {id}; ask the board owner to repair its active workflow stage before retrying completion"
         ),
         "use_lease_ops" => {
             "use claim / done / handoff / release; held tickets do not move by set".into()

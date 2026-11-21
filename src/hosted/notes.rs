@@ -62,6 +62,9 @@ impl HostedBoard {
             let now = self.scope(connection).await?;
             let workflow = self.configuration(connection, "workflow").await?;
             let ticket = self.ticket(connection, id, &workflow, now).await?;
+            let settings: Settings = self.configuration(connection, "settings").await?;
+            settings.check_note_kind(kind)?;
+            super::edits::supplied_fence(&ticket, fence)?;
             if ticket.holder.as_deref() == Some(actor.id) && !ticket.lease_expired {
                 crate::lease::check_held(&ticket, actor.id, fence)?;
             }
