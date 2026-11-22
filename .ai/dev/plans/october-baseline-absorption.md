@@ -5,11 +5,12 @@ five preserved sources. Local branch: `increment-288/absorb-october-baseline`. P
 integration is devagotchi/devagotchi's plan `.ai/dev/plans/absorb-preserved-sources.md`
 and its immutable `.ai/dev/plans/absorption/` file/commit ledger.
 
-The operator requires complete oldest-first source authoring before new CI/pushes.
-These are local commits within S1, not a separate helper/profile PR. Original source
-checkouts remain untouched. Hosted data remains PostgreSQL; no SQLite fallback.
+Publication correction, 2026-11-22: the operator directs publishing the authored
+integration and maintaining a visible roadmap toward green main. The parent plan records
+this scheduling correction. Source completion remains oldest-first; this integration does
+not close S1 or authorize deleting historical sources. Hosted data remains PostgreSQL.
 
-Current authored corrections from source store/edit.go, notes.go, hint.go and ops.go:
+Initial authored corrections from source store/edit.go, notes.go, hint.go and ops.go:
 
 - Metadata updates carry lease fences and progress through the sync/hosted API and
   both CLI faces. A live holder needs its fence; supplied stale fences refuse even
@@ -28,7 +29,7 @@ forms, plus matching HTTP/MCP tests. Policy/roles/registered identities, general
 remaining settings and other source behavior are still open in the parent packets.
 This work does not close the full source or authorize deletion of its historical refs.
 
-Local validation so far: nine focused checks passed before the lifecycle additions.
+Earlier checkpoint validation (superseded by the receipt below): nine focused checks passed before the lifecycle additions.
 The subsequent library run passed 123 tests; refusal-help coverage found the new
 not_completable code needed an explicit CLI next step. That mapping and its MCP counterpart
 are now authored, and the affected refusal-help test passed. All 57 parent AgentHub-surface
@@ -37,8 +38,48 @@ this unfinished source batch.
 
 Acceptance before source closure: every original file/commit mapped; domain and all
 relevant surfaces implemented; source-specific checks, complete integration checks and
-real platform/browser/Docker acceptance; green reviewed-head and main CI after all five
-sources are authored; verified merge and only then branch deletion.
+real platform/browser/Docker acceptance; green reviewed-head and main CI for each complete source; verified merge and only then branch deletion.
 
-Implementation: partial. Validation: focused/local only. Push: not performed.
-PR: not_created. Main: not delivered. **DELIVERY INCOMPLETE.**
+## Implemented scope
+
+The branch restores versioned task priorities/runtime settings; registered-principal
+policy and transactional recipients; durable ticket/lease/configuration/CLI retries;
+independent shared workflows; project retirement with retained history/generations;
+complete claim filtering; task access bindings and current label/lease evidence.
+PostgreSQL remains the hosted authority. Existing task/lease/receipt owners are reused.
+
+## Publication dependency
+
+The implementation uses shared store receipt APIs absent from root main. Pin contracts,
+connectors and both store dependency declarations to published root commit
+`30ede402ca7d61b689f1a20ee364d69206f0ee98`. Validate this checkout outside the parent workspace,
+so root path patches cannot hide dependency drift. Publish the existing 0eb461e history
+first to make the root commit's submodule reachable. The exact pinned root commit must
+remain reachable when root integration merges. No force push or source deletion.
+
+## Acceptance and delivery
+
+- Full library tests with required isolated PostgreSQL; no unavailable-store skips.
+- Standalone Git dependency resolution/build, formatting and current dependency audit.
+- Parent applicable build/tests/process probes and checked recursive checkout.
+- PR CI on the actual published candidate, then authorized merge and main verification.
+- Parent adopts the actual merged gitlink and validates that integration.
+
+Validation receipt, 2026-11-22:
+
+- Standalone `cargo test -- --test-threads=4`: 163 passed, zero failed/ignored,
+  with PostgreSQL required and actual Git dependencies (no parent path patches).
+- `cargo fmt --all -- --check`: passed.
+- `cargo deny` with the parent's policy: advisories, bans and licenses passed.
+  The parent's empty Git allowlist is specific to its path-patched workspace and refuses
+  this standalone graph. `cargo metadata --locked` independently verified that its only
+  Git source is the exact Devagotchi revision above; no registry policy was changed.
+- Published `0eb461e` was verified on GitHub; a fresh recursive parent clone succeeded.
+- Parent workspace validation found three hub integration failures; corrections and a
+  complete rerun are underway. This library's standalone 163 tests passed independently.
+
+Implementation: the library scope above is authored. Push: `0eb461e` published;
+exact dependency pin prepared. PR/main: pending. Main merge does not close the parent's
+remaining file/confinement/provider/guide/GUI/browser source obligations.
+
+DELIVERY INCOMPLETE.
