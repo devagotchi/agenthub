@@ -232,3 +232,63 @@ async fn access_binding_holds_the_board_lock_until_the_access_transaction_finish
         .unwrap();
     assert!(check(&test.store, &board, &binding).await.is_err());
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn access_observation_reads_current_labels_after_release_without_renewing_lease() {
+    let test = or_skip!(super::postgres());
+    let (board, lease, enabled) = fixture(&test.store).await;
+    let binding = bind(&test.store, &board, &lease).await.unwrap();
+    board
+        .release(
+            &Actor::agent("worker"),
+            &lease.ticket.id,
+            lease.fence,
+            "finished",
+        )
+        .await
+        .unwrap();
+    transaction!(&test.store, |c| {
+        test.store.scope(c, TENANT).await?;
+        sqlx::query(
+            "UPDATE board_tickets SET labels=$1 WHERE tenant_id=$2 AND board_id=$3 AND id=$4",
+        )
+        .bind("[\"restricted\"]")
+        .bind(TENANT)
+        .bind(board.board_id())
+        .bind(&lease.ticket.id)
+        .execute(c)
+        .await?;
+        Ok(())
+    })
+    .unwrap();
+    let labels = transaction!(&test.store, |c| {
+        board
+            .access_read_labels_in(c, &Actor::agent("worker"), &binding)
+            .await
+    })
+    .unwrap();
+    assert_eq!(labels, vec!["restricted"]);
+    assert!(check(&test.store, &board, &binding).await.is_err());
+    for field in ["tenant", "board", "project", "principal"] {
+        let mut wrong = binding.clone();
+        match field {
+            "tenant" => wrong.tenant.push('x'),
+            "board" => wrong.board.push('x'),
+            "project" => wrong.project.push('x'),
+            _ => wrong.principal.push('x'),
+        }
+        let result = transaction!(&test.store, |c| {
+            board
+                .access_read_labels_in(c, &Actor::agent("worker"), &wrong)
+                .await
+        });
+        assert_eq!(result.unwrap_err().code, "not_granted");
+    }
+    enabled.store(false, Ordering::SeqCst);
+    let result = transaction!(&test.store, |c| {
+        board
+            .access_read_labels_in(c, &Actor::agent("worker"), &binding)
+            .await
+    });
+    assert_eq!(result.unwrap_err().code, "not_granted");
+}

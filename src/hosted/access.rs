@@ -20,6 +20,40 @@ pub struct TaskLeaseBinding {
 }
 
 impl HostedBoard {
+    /// Current task resource for reading a previously admitted operation. This proves
+    /// board generation and principal access, but deliberately grants no lease renewal.
+    /// The host separately authorizes proc.read using these current labels.
+    pub async fn access_read_labels_in(
+        &self,
+        connection: &mut AnyConnection,
+        actor: &Actor<'_>,
+        binding: &TaskLeaseBinding,
+    ) -> DbResult<Vec<String>> {
+        if binding.tenant != self.tenant
+            || binding.project != self.name
+            || binding.board != self.project
+            || binding.principal != actor.id
+        {
+            return Err(fail(
+                "not_granted",
+                "operation belongs to another task or principal",
+            )
+            .into());
+        }
+        let now = self.scope(connection).await?;
+        let directory = self
+            .principals
+            .as_ref()
+            .ok_or_else(|| fail("not_granted", "task identity directory is unavailable"))?;
+        directory
+            .authorize_request(connection, &self.tenant, actor.id, actor)
+            .await?;
+        let workflow = self.configuration(connection, "workflow").await?;
+        Ok(self
+            .ticket(connection, &binding.ticket, &workflow, now)
+            .await?
+            .labels)
+    }
     /// Called with a board resolved for the authenticated account and canonical actor.
     /// This takes the board lock FIRST, before policy/catalog/access locks. It neither
     /// commits the transaction nor grants machine authority. The host must separately
