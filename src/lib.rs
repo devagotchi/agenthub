@@ -20,6 +20,7 @@ pub mod inbox;
 pub mod issue_lifecycle;
 mod lease;
 pub mod migrations;
+pub mod policy;
 mod project;
 mod provenance;
 pub mod scan;

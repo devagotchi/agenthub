@@ -62,6 +62,20 @@ impl HostedBoard {
             let now = self.scope(connection).await?;
             let workflow = self.configuration(connection, "workflow").await?;
             let ticket = self.ticket(connection, id, &workflow, now).await?;
+            let settings: Settings = self.configuration(connection, "settings").await?;
+            settings.check_note_kind(kind)?;
+            self.authorize(
+                connection,
+                actor,
+                &format!("note.add:{kind}"),
+                &ticket.labels,
+            )
+            .await?;
+            let receipt = self.begin_mutation(connection, actor, "add_note").await?;
+            if let Receipt::Replay(result) = receipt {
+                return Ok(result);
+            }
+            super::edits::supplied_fence(&ticket, fence)?;
             if ticket.holder.as_deref() == Some(actor.id) && !ticket.lease_expired {
                 crate::lease::check_held(&ticket, actor.id, fence)?;
             }
@@ -78,7 +92,7 @@ impl HostedBoard {
                 serde_json::json!({"seq":note.seq,"kind":kind,"to":to}),
             )
             .await?;
-            Ok(note)
+            receipt.complete(connection, note).await
         })
     }
 }

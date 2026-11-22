@@ -90,22 +90,34 @@ fn need<'p>(
     arg(parsed, n).ok_or_else(|| usage_error(format!("{what} is required")))
 }
 
-/// `--fence`, or the fence this actor cached when it claimed `id`.
+/// Prepared requests already froze the cached fence, including its absence.
+fn optional_fence(
+    parsed: &Parsed,
+    cache: &ClaimCache,
+    id: &str,
+) -> Result<Option<i64>, (BridgeError, Option<String>)> {
+    Ok(parsed.int("--fence").map_err(usage_error)?.or_else(|| {
+        if parsed.flag("--request-id").is_some() {
+            None
+        } else {
+            cache.claims.get(id).map(|c| c.fence)
+        }
+    }))
+}
+
+/// `--fence`, or the original cached fence this actor supplied for this request.
 fn fence_for(
     parsed: &Parsed,
     cache: &ClaimCache,
     id: &str,
 ) -> Result<i64, (BridgeError, Option<String>)> {
-    match parsed.int("--fence").map_err(usage_error)? {
-        Some(f) => Ok(f),
-        None => cache.claims.get(id).map(|c| c.fence).ok_or_else(|| {
-            (
-                BridgeError::new(
-                    "stale_fence",
-                    format!("no cached claim for {id}; pass --fence or claim it first"),
-                ),
-                Some(id.to_string()),
-            )
-        }),
-    }
+    optional_fence(parsed, cache, id)?.ok_or_else(|| {
+        (
+            BridgeError::new(
+                "stale_fence",
+                format!("no cached claim for {id}; pass --fence or claim it first"),
+            ),
+            Some(id.to_string()),
+        )
+    })
 }

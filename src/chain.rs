@@ -40,13 +40,15 @@ pub mod actions {
     pub const WORKFLOW_DELETED: &str = "workflow.deleted";
     pub const WORKFLOW_BOUND: &str = "workflow.bound";
     pub const WORKFLOW_DETACHED: &str = "workflow.detached";
+    pub const PROJECT_SAVED: &str = "project.saved";
+    pub const PROJECT_RETIRED: &str = "project.retired";
     pub const ISSUE_PROJECTED: &str = "issue.projected";
     pub const ISSUE_CONTEXT_ADDED: &str = "issue.context_added";
     /// Was `notes.wake_set` before B3.
     pub const WAKE_SET: &str = "wake.set";
 
     /// Every action, in the order above.
-    pub const ALL: [&str; 28] = [
+    pub const ALL: [&str; 30] = [
         TICKET_CREATED,
         TICKET_UPDATED,
         TICKET_CLAIMED,
@@ -72,6 +74,8 @@ pub mod actions {
         WORKFLOW_DELETED,
         WORKFLOW_BOUND,
         WORKFLOW_DETACHED,
+        PROJECT_SAVED,
+        PROJECT_RETIRED,
         ISSUE_PROJECTED,
         ISSUE_CONTEXT_ADDED,
         WAKE_SET,

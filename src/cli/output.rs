@@ -12,20 +12,42 @@ use super::{ErrorBody, ErrorOut, exit_code_for, next_for};
 pub(super) struct Output<'a> {
     pub(super) json: bool,
     pub(super) quiet: bool,
+    pub(super) request: Option<(String, std::sync::Arc<std::sync::atomic::AtomicBool>)>,
     pub(super) out: &'a mut dyn Write,
     pub(super) err: &'a mut dyn Write,
 }
 
 impl Output<'_> {
+    fn encoded(&self, value: &impl Serialize, success: bool) -> String {
+        let mut value = serde_json::to_value(value).expect("CLI domain results are JSON-safe");
+        if let Some((key, replayed)) = &self.request {
+            if !value.is_object() {
+                value = serde_json::json!({"result":value});
+            }
+            value["request_id"] = key.clone().into();
+            value["replayed"] =
+                (success && replayed.load(std::sync::atomic::Ordering::Relaxed)).into();
+        }
+        serde_json::to_string(&value).expect("JSON value encodes")
+    }
+
     pub(super) fn value(&mut self, value: &impl Serialize, text: impl FnOnce() -> String) {
         if self.json {
-            let _ = writeln!(
-                self.out,
-                "{}",
-                serde_json::to_string(value).unwrap_or_default()
-            );
+            let _ = writeln!(self.out, "{}", self.encoded(value, true));
         } else if !self.quiet {
-            let _ = writeln!(self.out, "{}", text());
+            if self
+                .request
+                .as_ref()
+                .is_some_and(|(_, replayed)| replayed.load(std::sync::atomic::Ordering::Relaxed))
+            {
+                let _ = writeln!(
+                    self.out,
+                    "replayed original result (no new change): {}",
+                    text()
+                );
+            } else {
+                let _ = writeln!(self.out, "{}", text());
+            }
         }
     }
 
@@ -57,11 +79,7 @@ impl Output<'_> {
                     next: next.clone(),
                 },
             };
-            let _ = writeln!(
-                self.out,
-                "{}",
-                serde_json::to_string(&body).unwrap_or_default()
-            );
+            let _ = writeln!(self.out, "{}", self.encoded(&body, false));
         } else {
             let _ = writeln!(
                 self.err,

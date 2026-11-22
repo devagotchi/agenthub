@@ -24,6 +24,11 @@ impl HostedBoard {
     /// Replace the settings whole. Settings equal to the board's write nothing; otherwise
     /// `board.settings_replaced` names the top-level keys that changed.
     pub async fn put_settings(&self, actor: &Actor<'_>, settings: &Settings) -> BridgeResult<()> {
+        crate::settings::check_priority_labels(settings.priority_labels.as_deref())?;
+        crate::settings::check_note_settings(
+            settings.heartbeat_hint_ms,
+            settings.note_kinds.as_deref(),
+        )?;
         if settings.lease_min_ttl_ms <= 0
             || settings.lease_max_ttl_ms < settings.lease_min_ttl_ms
             || settings.lease_ttl_ms < settings.lease_min_ttl_ms
@@ -35,8 +40,17 @@ impl HostedBoard {
         }
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.settings.put")
+                .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "put_settings")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             self.replace_settings_in(connection, actor, now, settings)
-                .await
+                .await?;
+            receipt.complete(connection, ()).await
         })
     }
 
@@ -47,6 +61,8 @@ impl HostedBoard {
         now: i64,
         settings: &Settings,
     ) -> DbResult<()> {
+        self.authorize_configuration(connection, actor, "admin.settings.put")
+            .await?;
         let current: Settings = self.configuration(connection, "settings").await?;
         let changed = changed_keys(
             &serde_json::to_value(&current).expect("settings json"),
@@ -86,6 +102,13 @@ impl HostedBoard {
         .bind(value)
         .execute(&mut *connection)
         .await?;
+        if key == "workflow" {
+            sqlx::query("UPDATE board_projects SET version=version+1 WHERE tenant_id=$1 AND id=$2")
+                .bind(&self.tenant)
+                .bind(&self.project)
+                .execute(&mut *connection)
+                .await?;
+        }
         Ok(())
     }
 
@@ -105,6 +128,14 @@ impl HostedBoard {
             .transpose()?;
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.projects.put")
+                .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "set_project")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             let mut settings: Settings = self.configuration(connection, "settings").await?;
             let mut changed = serde_json::Map::new();
             if let Some(repo) = &repo
@@ -133,7 +164,7 @@ impl HostedBoard {
                 )
                 .await?;
             }
-            Ok(settings)
+            receipt.complete(connection, settings).await
         })
     }
 
@@ -143,8 +174,17 @@ impl HostedBoard {
         workflow.validate().map_err(invalid)?;
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.workflows.put")
+                .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "put_workflow")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             self.replace_workflow_in(connection, actor, now, workflow)
-                .await
+                .await?;
+            receipt.complete(connection, ()).await
         })
     }
 
@@ -155,6 +195,8 @@ impl HostedBoard {
         now: i64,
         workflow: &Workflow,
     ) -> DbResult<()> {
+        self.authorize_configuration(connection, actor, "admin.workflows.put")
+            .await?;
         if self.workflow_binding_in(connection).await?.is_some() {
             return Err(fail(
                 "shared_workflow",
@@ -279,13 +321,22 @@ impl HostedBoard {
         }
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.settings.put")
+                .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "edit_settings")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             self.expected_configuration(connection, "settings", expected)
                 .await?;
             let current = self.configuration(connection, "settings").await?;
             let next = edit.apply(&current, now)?;
             self.replace_settings_in(connection, actor, now, &next)
                 .await?;
-            self.configuration_state_in(connection).await
+            let result = self.configuration_state_in(connection).await?;
+            receipt.complete(connection, result).await
         })
     }
 
@@ -305,11 +356,20 @@ impl HostedBoard {
         workflow.validate().map_err(invalid)?;
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
+            self.authorize_configuration(connection, actor, "admin.workflows.put")
+                .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "edit_workflow")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             self.expected_configuration(connection, "workflow", expected)
                 .await?;
             self.replace_workflow_in(connection, actor, now, workflow)
                 .await?;
-            self.configuration_state_in(connection).await
+            let result = self.configuration_state_in(connection).await?;
+            receipt.complete(connection, result).await
         })
     }
 }

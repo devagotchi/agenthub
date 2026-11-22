@@ -105,20 +105,30 @@ impl Fixture {
     }
 }
 
+mod access_binding;
 mod actions;
 mod anchors;
 mod approvals;
 mod configuration;
+mod configuration_policy;
+mod configuration_receipts;
 mod create_dependencies;
 mod event_filters;
+mod held_updates;
 mod hosted;
 mod hosted_lifecycle;
 mod inbox;
 mod lanes;
+mod lease_absorption;
+mod lease_receipts;
+mod mutation_receipts;
 mod operations;
+mod policy_enforcement;
 mod principal_workload;
+mod runtime_settings;
 mod schema;
 mod search;
+mod selection;
 mod shared_workflows;
 mod sources;
 mod standalone;

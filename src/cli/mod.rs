@@ -39,6 +39,7 @@ mod hub;
 mod init;
 mod output;
 mod remote;
+mod requests;
 #[cfg(test)]
 mod tests;
 
@@ -123,6 +124,7 @@ pub fn run(mut invocation: Invocation, out: &mut dyn Write, err: &mut dyn Write)
             return EXIT_USAGE;
         }
     };
+    let original_request = requests::intent(&parsed);
     if parsed.command == "new"
         && let Some(session) = invocation
             .session_env
@@ -142,6 +144,7 @@ pub fn run(mut invocation: Invocation, out: &mut dyn Write, err: &mut dyn Write)
     let mut output = Output {
         json,
         quiet: parsed.switch("--quiet"),
+        request: None,
         out,
         err,
     };
@@ -149,6 +152,10 @@ pub fn run(mut invocation: Invocation, out: &mut dyn Write, err: &mut dyn Write)
         let _ = writeln!(output.out, "{USAGE}");
         return EXIT_OK;
     }
+    let selected_request = match requests::select(&parsed) {
+        Ok(request) => request,
+        Err(error) => return output.error(&error, None),
+    };
     let named = match parsed.flag("--as") {
         Some("auto") => match invocation
             .actor_env
@@ -182,6 +189,7 @@ pub fn run(mut invocation: Invocation, out: &mut dyn Write, err: &mut dyn Write)
     let actor = Actor {
         id: &actor_id,
         human,
+        policy: None,
         wip_limit: None,
     };
     let hook_input = if parsed.command == "hook" {
@@ -253,7 +261,7 @@ pub fn run(mut invocation: Invocation, out: &mut dyn Write, err: &mut dyn Write)
     // The face: the hub's board as the account when bound, else the standalone board, on a
     // runtime of its own that outlives it (declared first, dropped last).
     let local_runtime;
-    let face: Box<dyn Face> = match &config.hub {
+    let mut face: Box<dyn Face> = match &config.hub {
         Some(hub) => match remote_face(hub, &config, &invocation, &actor) {
             Ok(remote) => Box::new(remote),
             Err(error) => return output.error(&error, None),
@@ -285,6 +293,52 @@ pub fn run(mut invocation: Invocation, out: &mut dyn Write, err: &mut dyn Write)
         );
     }
     let mut cache = read_cache(&board_dir, &actor_id);
+    let _prepared_request = if let Some(request) = selected_request {
+        output.request = Some((
+            request.key.clone(),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        ));
+        if !output.json && !output.quiet {
+            let _ = writeln!(
+                output.err,
+                "request {} (reuse --request-id for this same mutation)",
+                request.key
+            );
+        }
+        let (principal, identity) = match face.request_identity(&actor) {
+            Ok(identity) => identity,
+            Err(error) => return output.error(&error, None),
+        };
+        let storage = if config.hub.is_none() {
+            invocation
+                .storage_env
+                .as_deref()
+                .or(config.storage.as_deref())
+        } else {
+            None
+        };
+        let scope = serde_json::json!({"identity":identity,"storage":storage,"actor":actor.id,"human":actor.human});
+        let prepared = match requests::prepare(
+            &board_dir,
+            &scope,
+            &request,
+            &original_request,
+            &parsed,
+            &cache,
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => return output.error(&error, None),
+        };
+        match face.set_request(&principal, &request.key, request.operation, &prepared.input) {
+            Ok(replayed) => output.request = Some((request.key, replayed)),
+            Err(error) => return output.error(&error, None),
+        }
+        parsed = prepared.parsed.clone();
+        Some(prepared)
+    } else {
+        None
+    };
+
     let result = dispatch(
         &parsed,
         face.as_ref(),
@@ -293,7 +347,9 @@ pub fn run(mut invocation: Invocation, out: &mut dyn Write, err: &mut dyn Write)
         &board_dir,
         &mut output,
     );
-    write_cache(&board_dir, &actor_id, &cache);
+    if !face.replayed() {
+        write_cache(&board_dir, &actor_id, &cache);
+    }
     match result {
         Ok(code) => code,
         Err((error, id)) => output.error(&error, id.as_deref()),

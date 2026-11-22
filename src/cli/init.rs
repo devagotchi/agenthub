@@ -11,7 +11,7 @@ use crate::{
 use super::{EXIT_OK, Invocation, Output, Parsed, write_json};
 
 /// What `.devagotchi/` keeps out of the repo: the claim cache and the beat markers.
-pub(super) const LOCAL_GITIGNORE: &str = "# local state; board.jsonl is the export to commit if you want diffs\nclaims/\nhooks/.last-beat-*\n";
+pub(super) const LOCAL_GITIGNORE: &str = "# local state; board.jsonl is the export to commit if you want diffs\nclaims/\nrequests/\nhooks/.last-beat-*\n";
 
 pub(super) fn init(parsed: &Parsed, invocation: &Invocation, output: &mut Output<'_>) -> u8 {
     let project_dir = parsed

@@ -31,6 +31,15 @@ pub struct Settings {
     pub max_lease_expiries: i64,
     pub wip_limit_default: i64,
     pub default_priority: i64,
+    /// Preferred heartbeat interval, capped at a third of the actual lease length.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heartbeat_hint_ms: Option<i64>,
+    /// An absent or empty list permits any note kind; internal lease notes are unaffected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_kinds: Option<Vec<String>>,
+    /// Display labels indexed by numeric priority; missing entries keep the P<number> label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority_labels: Option<Vec<String>>,
     /// The project's repository URL, named once; tickets pick it up.
     #[serde(default)]
     pub repo: Option<String>,
@@ -71,6 +80,12 @@ pub struct SettingsEdit {
     pub max_lease_expiries: i64,
     pub wip_limit_default: i64,
     pub default_priority: i64,
+    #[serde(default)]
+    pub heartbeat_hint_ms: Option<i64>,
+    #[serde(default)]
+    pub note_kinds: Option<Vec<String>>,
+    #[serde(default)]
+    pub priority_labels: Option<Vec<String>>,
     pub repo: Option<String>,
     pub environments: Vec<String>,
 }
@@ -84,6 +99,9 @@ impl From<&Settings> for SettingsEdit {
             max_lease_expiries: s.max_lease_expiries,
             wip_limit_default: s.wip_limit_default,
             default_priority: s.default_priority,
+            heartbeat_hint_ms: s.heartbeat_hint_ms,
+            note_kinds: s.note_kinds.clone(),
+            priority_labels: s.priority_labels.clone(),
             repo: s.repo.clone(),
             environments: s.environments.clone(),
         }
@@ -113,6 +131,8 @@ impl SettingsEdit {
             .map(check_repo)
             .transpose()?;
         let environments = check_environments(&self.environments)?;
+        check_note_settings(self.heartbeat_hint_ms, self.note_kinds.as_deref())?;
+        check_priority_labels(self.priority_labels.as_deref())?;
         Ok(Settings {
             lease_ttl_ms: self.lease_ttl_ms,
             lease_min_ttl_ms: self.lease_min_ttl_ms,
@@ -120,6 +140,9 @@ impl SettingsEdit {
             max_lease_expiries: self.max_lease_expiries,
             wip_limit_default: self.wip_limit_default,
             default_priority: self.default_priority,
+            heartbeat_hint_ms: self.heartbeat_hint_ms,
+            note_kinds: self.note_kinds.clone(),
+            priority_labels: self.priority_labels.clone(),
             repo,
             environments,
             standing: current.standing.clone(),
@@ -195,9 +218,89 @@ impl Default for Settings {
             max_lease_expiries: 3,
             wip_limit_default: 2,
             default_priority: 2,
+            heartbeat_hint_ms: Some(Self::DEFAULT_HEARTBEAT_HINT_MS),
+            priority_labels: Some(
+                ["P0 urgent", "P1 high", "P2 normal", "P3 low", "P4 someday"]
+                    .map(String::from)
+                    .to_vec(),
+            ),
+            note_kinds: Some(
+                [
+                    "note", "handoff", "blocker", "decision", "summary", "review", "question",
+                ]
+                .map(String::from)
+                .to_vec(),
+            ),
             repo: None,
             environments: default_environments(),
             standing: Vec::new(),
         }
     }
+}
+
+pub(crate) fn check_note_settings(hint: Option<i64>, kinds: Option<&[String]>) -> BridgeResult<()> {
+    if hint.is_some_and(|hint| hint < 1_000) {
+        return Err(crate::invalid("heartbeat hint must be at least one second"));
+    }
+    if let Some(kinds) = kinds {
+        if kinds.len() > 64 {
+            return Err(crate::invalid("choose at most 64 note kinds"));
+        }
+        for (index, kind) in kinds.iter().enumerate() {
+            if !crate::valid_name(kind) || kinds[..index].contains(kind) {
+                return Err(crate::invalid(
+                    "note kinds must be distinct lowercase names (1 to 63 characters)",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+impl Settings {
+    pub const DEFAULT_HEARTBEAT_HINT_MS: i64 = 300_000;
+
+    pub fn priority_label(&self, priority: i64) -> String {
+        usize::try_from(priority)
+            .ok()
+            .and_then(|index| self.priority_labels.as_ref()?.get(index))
+            .cloned()
+            .unwrap_or_else(|| format!("P{priority}"))
+    }
+
+    pub fn heartbeat_every_ms(&self, ttl_ms: i64) -> i64 {
+        self.heartbeat_hint_ms
+            .unwrap_or(Self::DEFAULT_HEARTBEAT_HINT_MS)
+            .min(crate::lease::beat_every(ttl_ms))
+            .max(1_000)
+    }
+
+    pub(crate) fn check_note_kind(&self, kind: &str) -> BridgeResult<()> {
+        if let Some(kinds) = &self.note_kinds
+            && !kinds.is_empty()
+            && !kinds.iter().any(|allowed| allowed == kind)
+        {
+            return Err(crate::invalid(format!(
+                "note kind must be one of: {}",
+                kinds.join(", ")
+            )));
+        }
+        Ok(())
+    }
+}
+
+pub(crate) fn check_priority_labels(labels: Option<&[String]>) -> BridgeResult<()> {
+    if let Some(labels) = labels
+        && (labels.len() > 32
+            || labels.iter().any(|label| {
+                label.trim().is_empty()
+                    || label.chars().count() > 80
+                    || label.chars().any(char::is_control)
+            }))
+    {
+        return Err(crate::invalid(
+            "choose at most 32 priority labels, each 1 to 80 printable characters",
+        ));
+    }
+    Ok(())
 }

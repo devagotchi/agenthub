@@ -12,6 +12,14 @@ impl Board {
         self.hosted_call(self.hosted.shared_workflows())
     }
 
+    pub fn create_shared_workflow(
+        &self,
+        actor: &Actor<'_>,
+        workflow: &Workflow,
+    ) -> BridgeResult<SharedWorkflow> {
+        self.hosted_call(self.hosted.create_shared_workflow(actor, workflow))
+    }
+
     pub fn publish_workflow(
         &self,
         actor: &Actor<'_>,

@@ -20,10 +20,11 @@ pub(super) fn exit_code_for(code: &str) -> u8 {
         "stale_fence" | "version_conflict" | "held_by_other" | "lease_expired" | "not_holder"
         | "wip_limit" | "blocked" | "distinct_required" | "dependency_cycle" | "not_held"
         | "source_conflict" | "parent_closed" | "request_conflict" | "already_exists"
-        | "in_use" | "shared_workflow" => EXIT_CONFLICT,
+        | "in_use" | "shared_workflow" | "not_completable" => EXIT_CONFLICT,
         "not_found" => EXIT_NOT_FOUND,
         "board_store" | "board_random" | "board_id" | "no_board" | "no_storage"
-        | "board_runtime" | "board_io" | "hub_unreachable" | "hub_error" => EXIT_UNAVAILABLE,
+        | "board_runtime" | "board_io" | "hub_unreachable" | "hub_error" | "receipt_damaged"
+        | "receipt_incomplete" => EXIT_UNAVAILABLE,
         "usage" => EXIT_USAGE,
         _ => EXIT_REFUSED,
     }
@@ -61,10 +62,14 @@ pub(super) fn next_for(code: &str, id: Option<&str>) -> String {
         "not_claimable" => format!(
             "board show {id} — only a lane queue is claimable; a person moves it with board set"
         ),
+        "not_completable" => format!(
+            "board show {id}; ask the board owner to repair its active workflow stage before retrying completion"
+        ),
         "use_lease_ops" => {
             "use claim / done / handoff / release; held tickets do not move by set".into()
         }
         "transition_not_allowed" => "board agent lists the transitions the workflow allows".into(),
+        "policy_denied" => "ask the environment owner to review this agent's roles and matching policy rule; changing credentials does not change its authority".into(),
         "humans_only" => {
             "ask the person who owns this board; run without --as to act as yourself".into()
         }
@@ -96,6 +101,9 @@ pub(super) fn next_for(code: &str, id: Option<&str>) -> String {
         "approval_decide_only" => {
             "an approval changes only by a person's decision on the hub's approvals page".into()
         }
+        "request_retired" => "this key is permanently retired; reconcile the original result with board show and archived history before starting new work".into(),
+        "not_granted" => "sign in again and check the account or agent is enabled and still has access to this board".into(),
+        "receipt_damaged" | "receipt_incomplete" => "stop retrying this mutation and ask the hub operator to inspect its stored receipt; do not change the key to bypass it".into(),
         "request_conflict" => {
             "retry with the same content, or use a new request id for new content".into()
         }

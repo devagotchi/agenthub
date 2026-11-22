@@ -24,6 +24,8 @@ pub struct Lease {
 #[derive(Debug, Clone, Default)]
 pub struct NextFilter {
     pub label: Option<String>,
+    /// All of these labels must be present, together with the singular label if given.
+    pub labels: Vec<String>,
     pub states: Vec<String>,
     pub parent: Option<String>,
     pub ttl_ms: Option<i64>,
@@ -136,6 +138,27 @@ impl Board {
 
 pub fn beat_every(ttl_ms: i64) -> i64 {
     (ttl_ms / 3).max(1_000)
+}
+
+pub(crate) fn projection(
+    ticket: Ticket,
+    settings: &Settings,
+    already_held: bool,
+) -> BridgeResult<Lease> {
+    let ttl = ticket.lease_ttl_ms.unwrap_or(settings.lease_ttl_ms);
+    Ok(Lease {
+        fence: ticket.fence,
+        lease_id: ticket
+            .lease_id
+            .clone()
+            .ok_or_else(|| fail("board_damaged", "held ticket has no lease ID"))?,
+        lease_expires_at: ticket
+            .lease_expires_at
+            .ok_or_else(|| fail("board_damaged", "held ticket has no lease expiry"))?,
+        heartbeat_every_ms: settings.heartbeat_every_ms(ttl),
+        already_held,
+        ticket,
+    })
 }
 
 pub fn clamp_ttl(settings: &Settings, asked: Option<i64>) -> i64 {

@@ -48,7 +48,13 @@ impl HostedBoard {
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
             let workflow = self.configuration(connection, "workflow").await?;
-            self.ticket(connection, id, &workflow, now).await?;
+            let ticket = self.ticket(connection, id, &workflow, now).await?;
+            self.authorize(connection, actor, "task.edit", &ticket.labels)
+                .await?;
+            let receipt = self.begin_mutation(connection, actor, "add_dep").await?;
+            if let Receipt::Replay(result) = receipt {
+                return Ok(result);
+            }
             self.ticket(connection, depends_on, &workflow, now).await?;
             if kind == DepKind::Blocks {
                 let count:i64=sqlx::query_scalar(
@@ -73,7 +79,8 @@ impl HostedBoard {
                 .bind(actor.id).bind(now).execute(&mut *connection).await?.rows_affected();
             // Already there: the graph as it is, nothing written, nobody woken (rule 6).
             if added == 0 {
-                return self.deps(connection, id, false).await;
+                let result = self.deps(connection, id, false).await?;
+                return receipt.complete(connection, result).await;
             }
             self.event(
                 connection,
@@ -85,7 +92,8 @@ impl HostedBoard {
                 serde_json::json!({"depends_on":depends_on,"kind":kind.as_str()}),
             )
             .await?;
-            self.deps(connection, id, false).await
+            let result = self.deps(connection, id, false).await?;
+            receipt.complete(connection, result).await
         })
     }
 
@@ -98,6 +106,14 @@ impl HostedBoard {
     ) -> BridgeResult<Vec<Dep>> {
         transaction!(&self.store, |connection| {
             let now = self.scope(connection).await?;
+            let workflow = self.configuration(connection, "workflow").await?;
+            let ticket = self.ticket(connection, id, &workflow, now).await?;
+            self.authorize(connection, actor, "task.edit", &ticket.labels)
+                .await?;
+            let receipt = self.begin_mutation(connection, actor, "remove_dep").await?;
+            if let Receipt::Replay(result) = receipt {
+                return Ok(result);
+            }
             let removed=sqlx::query(
                 "DELETE FROM board_deps WHERE tenant_id=$1 AND board_id=$2 AND ticket=$3 AND depends_on=$4 AND kind=$5",
             ).bind(&self.tenant).bind(&self.project).bind(id).bind(depends_on).bind(kind.as_str())
@@ -115,7 +131,8 @@ impl HostedBoard {
                 serde_json::json!({"depends_on":depends_on,"kind":kind.as_str()}),
             )
             .await?;
-            self.deps(connection, id, false).await
+            let result = self.deps(connection, id, false).await?;
+            receipt.complete(connection, result).await
         })
     }
 }

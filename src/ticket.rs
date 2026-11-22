@@ -14,6 +14,8 @@ pub struct Actor<'a> {
     pub id: &'a str,
     pub human: bool,
     pub wip_limit: Option<i64>,
+    /// Verified profile authority. Unbound legacy callers retain their host's contract.
+    pub policy: Option<crate::policy::Identity>,
 }
 
 impl<'a> Actor<'a> {
@@ -23,6 +25,7 @@ impl<'a> Actor<'a> {
             id,
             human: false,
             wip_limit: None,
+            policy: None,
         }
     }
 
@@ -32,6 +35,7 @@ impl<'a> Actor<'a> {
             id,
             human: true,
             wip_limit: None,
+            policy: None,
         }
     }
 }
@@ -259,6 +263,10 @@ pub(crate) fn one() -> i64 {
 
 #[derive(Debug, Clone, Default)]
 pub struct Patch {
+    /// The current fence is required while the caller holds a live lease.
+    pub fence: Option<i64>,
+    /// Replace the progress shown to watchers without extending the lease.
+    pub progress: Option<serde_json::Value>,
     pub title: Option<String>,
     pub description: Option<String>,
     pub priority: Option<i64>,

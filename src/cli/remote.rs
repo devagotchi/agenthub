@@ -27,6 +27,8 @@ pub struct Remote {
     client: RefCell<Box<dyn Session>>,
     project: String,
     prefix: String,
+    request: Option<(String, String)>,
+    replayed: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[derive(Deserialize)]
@@ -54,12 +56,52 @@ impl Remote {
             client: RefCell::new(client),
             project: project.to_string(),
             prefix: prefix.to_string(),
+            request: None,
+            replayed: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 
     fn call<T: serde::de::DeserializeOwned>(&self, tool: &str, mut args: Value) -> BridgeResult<T> {
+        if let Some((_, expected)) = &self.request
+            && expected != tool
+            && !matches!(
+                tool,
+                "board_get" | "board_list" | "board_ready" | "board_prime" | "board_verify"
+            )
+        {
+            return Err(BridgeError::new(
+                "usage",
+                "the prepared request does not authorize this mutation",
+            ));
+        }
         args["project"] = Value::String(self.project.clone());
-        call(self.client.borrow_mut().as_mut(), tool, args)
+        let key = self
+            .request
+            .as_ref()
+            .filter(|(_, expected)| expected == tool)
+            .map(|(key, _)| key);
+        if let Some(key) = key {
+            args["request_id"] = Value::String(key.clone());
+            self.replayed
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+        }
+        let value: Value = call(self.client.borrow_mut().as_mut(), tool, args)?;
+        if let Some(key) = key {
+            if value["request_id"].as_str() != Some(key.as_str()) || !value["replayed"].is_boolean()
+            {
+                return Err(BridgeError::new(
+                    "hub_error",
+                    "the hub did not confirm the mutation receipt; preserve the request key and reconcile its result",
+                ));
+            }
+            self.replayed.store(
+                value["replayed"].as_bool().unwrap_or(false),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+        serde_json::from_value(value).map_err(|error| {
+            BridgeError::new("hub_error", format!("{tool}: invalid response: {error}"))
+        })
     }
 
     /// The hub is the arbiter; its tools name the seat from the session, never from a
@@ -70,6 +112,56 @@ impl Remote {
 }
 
 impl Face for Remote {
+    fn request_identity(&self, _actor: &Actor<'_>) -> BridgeResult<(String, Value)> {
+        let who: Value = call(self.client.borrow_mut().as_mut(), "whoami", json!({}))?;
+        if who["board_request_receipts"].as_bool() != Some(true) {
+            return Err(BridgeError::new(
+                "not_supported",
+                "this hub does not advertise board mutation receipts; update the hub before sending a retryable write",
+            ));
+        }
+        let account = who["subject"]
+            .as_str()
+            .filter(|id| !id.is_empty())
+            .ok_or_else(|| {
+                BridgeError::new("hub_error", "whoami omitted the authenticated account")
+            })?;
+        let principal = who["agent"].as_str().unwrap_or(account);
+        Ok((
+            principal.into(),
+            json!({"hub":self.client.borrow().hub(),"project":self.project,"account":account,"principal":principal,"tenant":who["tenant"]}),
+        ))
+    }
+
+    fn set_request(
+        &mut self,
+        _principal: &str,
+        key: &str,
+        operation: &str,
+        _input: &Value,
+    ) -> BridgeResult<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        let tool = match operation {
+            "create_task" => "board_create",
+            "update_task" => "board_update",
+            "claim" | "claim_next" => "board_claim",
+            "heartbeat" => "board_heartbeat",
+            "release" => "board_release",
+            "complete" => "board_complete",
+            "handoff" => "board_handoff",
+            "force_release" => "board_force_release",
+            "add_note" => "board_note",
+            "add_dep" | "remove_dep" => "board_dep",
+            "set_project" => "board_settings",
+            _ => return Err(BridgeError::new("usage", "unsupported retry operation")),
+        };
+        self.request = Some((key.into(), tool.into()));
+        Ok(self.replayed.clone())
+    }
+
+    fn replayed(&self) -> bool {
+        self.replayed.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn now(&self) -> i64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -165,6 +257,7 @@ impl Face for Remote {
             json!({
                 "ttl_ms": filter.ttl_ms,
                 "label": filter.label,
+                "labels": filter.labels,
                 "states": filter.states,
                 "parent": filter.parent,
             }),
@@ -179,10 +272,11 @@ impl Face for Remote {
         fence: i64,
         progress: Option<Value>,
     ) -> BridgeResult<Lease> {
-        self.call(
-            "board_heartbeat",
-            json!({ "id": id, "fence": fence, "progress": progress }),
-        )
+        let mut input = json!({ "id": id, "fence": fence });
+        if let Some(progress) = progress {
+            input["progress"] = progress;
+        }
+        self.call("board_heartbeat", input)
     }
 
     fn add_note(
@@ -256,27 +350,34 @@ impl Face for Remote {
             Some(None) => (None, true),
             None => (None, false),
         };
-        self.call(
-            "board_update",
-            json!({
-                "id": id,
-                "version": version,
-                "title": patch.title,
-                "description": patch.description,
-                "priority": patch.priority,
-                "labels": patch.labels,
-                "assignee": assignee,
-                "clear_assignee": clear_assignee,
-                "state": patch.state,
-                // A cleared anchor travels as "", which the hub clears.
-                "machine": patch.anchors.machine.map(Option::unwrap_or_default),
-                "repo": patch.anchors.repo.map(Option::unwrap_or_default),
-                "environment": patch.anchors.environment.map(Option::unwrap_or_default),
-                "agent": patch.anchors.agent.map(Option::unwrap_or_default),
-                "session": patch.anchors.session.map(Option::unwrap_or_default),
-                "fingerprint": patch.anchors.fingerprint.map(Option::unwrap_or_default),
-            }),
-        )
+        let has_progress = patch.progress.is_some();
+        let mut arguments = json!({
+            "id": id,
+            "version": version,
+            "fence": patch.fence,
+            "progress": patch.progress,
+            "title": patch.title,
+            "description": patch.description,
+            "priority": patch.priority,
+            "labels": patch.labels,
+            "assignee": assignee,
+            "clear_assignee": clear_assignee,
+            "state": patch.state,
+            // A cleared anchor travels as "", which the hub clears.
+            "machine": patch.anchors.machine.map(Option::unwrap_or_default),
+            "repo": patch.anchors.repo.map(Option::unwrap_or_default),
+            "environment": patch.anchors.environment.map(Option::unwrap_or_default),
+            "agent": patch.anchors.agent.map(Option::unwrap_or_default),
+            "session": patch.anchors.session.map(Option::unwrap_or_default),
+            "fingerprint": patch.anchors.fingerprint.map(Option::unwrap_or_default),
+        });
+        if !has_progress {
+            arguments
+                .as_object_mut()
+                .expect("update object")
+                .remove("progress");
+        }
+        self.call("board_update", arguments)
     }
 
     fn add_dep(

@@ -31,6 +31,7 @@ fn principal(id: &str, limit: i64) -> Actor<'_> {
     Actor {
         id,
         human: false,
+        policy: None,
         wip_limit: Some(limit),
     }
 }

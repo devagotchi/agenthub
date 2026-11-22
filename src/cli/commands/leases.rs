@@ -3,7 +3,7 @@
 use crate::cli::{CachedClaim, CommandResult, EXIT_OK, no_id, usage_error, with_id};
 use crate::{Filter, NextFilter, face::ME};
 
-use super::{Command, arg, fence_for, need};
+use super::{Command, arg, fence_for, need, optional_fence};
 
 /// `board claim`: claim a ticket, or the first ready one, and cache its fence.
 pub(super) fn claim(c: Command<'_, '_>) -> CommandResult {
@@ -19,8 +19,11 @@ pub(super) fn claim(c: Command<'_, '_>) -> CommandResult {
     let lease = match arg(parsed, 0) {
         Some(id) => with_id(id, board.claim(actor, id, ttl))?,
         None => {
+            let mut labels = parsed.flag_all("--label");
+            labels.pop(); // The last value stays in the original singular field for retry stability.
             let filter = NextFilter {
                 label: parsed.flag("--label").map(str::to_string),
+                labels,
                 states: parsed.flag_all("--state"),
                 parent: parsed.flag("--parent").map(str::to_string),
                 ttl_ms: ttl,
@@ -36,14 +39,16 @@ pub(super) fn claim(c: Command<'_, '_>) -> CommandResult {
             }
         }
     };
-    cache.claims.insert(
-        lease.ticket.id.clone(),
-        CachedClaim {
-            fence: lease.fence,
-            version: lease.ticket.version,
-            lease_expires_at: lease.lease_expires_at,
-        },
-    );
+    if !board.replayed() {
+        cache.claims.insert(
+            lease.ticket.id.clone(),
+            CachedClaim {
+                fence: lease.fence,
+                version: lease.ticket.version,
+                lease_expires_at: lease.lease_expires_at,
+            },
+        );
+    }
     output.value(&lease, || {
         format!(
             "{}  claimed (fence {}, heartbeat every {}s): {}\n  board beat {} · board done {} \"summary\" · board handoff {} \"note\"",
@@ -126,14 +131,16 @@ pub(super) fn beat(c: Command<'_, '_>) -> CommandResult {
         None => None,
     };
     let lease = with_id(id, board.heartbeat(actor, id, fence, progress))?;
-    cache.claims.insert(
-        id.to_string(),
-        CachedClaim {
-            fence: lease.fence,
-            version: lease.ticket.version,
-            lease_expires_at: lease.lease_expires_at,
-        },
-    );
+    if !board.replayed() {
+        cache.claims.insert(
+            id.to_string(),
+            CachedClaim {
+                fence: lease.fence,
+                version: lease.ticket.version,
+                lease_expires_at: lease.lease_expires_at,
+            },
+        );
+    }
     output.value(&lease, || {
         format!("{id}  lease extended to {}", lease.lease_expires_at)
     });
@@ -152,10 +159,7 @@ pub(super) fn note(c: Command<'_, '_>) -> CommandResult {
     } = c;
     let id = need(parsed, 0, "ID")?;
     let text = need(parsed, 1, "TEXT")?;
-    let fence = parsed
-        .int("--fence")
-        .map_err(usage_error)?
-        .or_else(|| cache.claims.get(id).map(|c| c.fence));
+    let fence = optional_fence(parsed, cache, id)?;
     let note = with_id(
         id,
         board.add_note(
@@ -187,7 +191,9 @@ pub(super) fn done(c: Command<'_, '_>) -> CommandResult {
         id,
         board.complete(actor, id, fence, arg(parsed, 1).unwrap_or("")),
     )?;
-    cache.claims.remove(id);
+    if !board.replayed() {
+        cache.claims.remove(id);
+    }
     output.value(&ticket, || format!("{id}  → {}", ticket.state));
     Ok(EXIT_OK)
 }
@@ -209,7 +215,9 @@ pub(super) fn handoff(c: Command<'_, '_>) -> CommandResult {
         id,
         board.handoff(actor, id, fence, note, parsed.flag("--to")),
     )?;
-    cache.claims.remove(id);
+    if !board.replayed() {
+        cache.claims.remove(id);
+    }
     output.value(&ticket, || {
         format!(
             "{id}  → {} (assigned to {})",
@@ -236,7 +244,9 @@ pub(super) fn release(c: Command<'_, '_>) -> CommandResult {
         id,
         board.release(actor, id, fence, arg(parsed, 1).unwrap_or("")),
     )?;
-    cache.claims.remove(id);
+    if !board.replayed() {
+        cache.claims.remove(id);
+    }
     output.value(&ticket, || format!("{id}  → {}", ticket.state));
     Ok(EXIT_OK)
 }

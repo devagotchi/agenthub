@@ -137,7 +137,7 @@ pub async fn names(store: &Store, tenant: &str, owner: &str) -> BridgeResult<Vec
     transaction!(store, |connection| {
         store.scope(connection, tenant).await?;
         Ok(sqlx::query_scalar(
-            "SELECT project_name FROM board_projects WHERE tenant_id=$1 AND owner_id=$2
+            "SELECT project_name FROM board_projects WHERE tenant_id=$1 AND owner_id=$2 AND retired_at IS NULL
              ORDER BY project_name COLLATE \"C\"",
         )
         .bind(tenant)
@@ -152,7 +152,7 @@ pub async fn boards(store: &Store, tenant: &str) -> BridgeResult<Vec<BoardRow>> 
     let rows: Vec<(String, Option<String>, Option<String>)> = transaction!(store, |connection| {
         store.scope(connection, tenant).await?;
         Ok(sqlx::query_as(
-            "SELECT id, owner_id, project_name FROM board_projects WHERE tenant_id=$1 ORDER BY id",
+            "SELECT id, owner_id, project_name FROM board_projects WHERE tenant_id=$1 AND retired_at IS NULL ORDER BY id",
         )
         .bind(tenant)
         .fetch_all(&mut *connection)
@@ -178,7 +178,7 @@ pub async fn has_board(
     transaction!(store, |connection| {
         store.scope(connection, tenant).await?;
         let count: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM board_projects WHERE tenant_id=$1 AND owner_id=$2 AND project_name=$3",
+            "SELECT count(*) FROM board_projects WHERE tenant_id=$1 AND owner_id=$2 AND project_name=$3 AND retired_at IS NULL",
         )
         .bind(tenant)
         .bind(owner)

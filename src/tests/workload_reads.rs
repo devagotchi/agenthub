@@ -23,6 +23,7 @@ fn actor(id: &str) -> Actor<'_> {
     Actor {
         id,
         human: false,
+        policy: None,
         wip_limit: Some(0),
     }
 }

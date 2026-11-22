@@ -23,12 +23,12 @@ path = "src/lib.rs"
 # the Postgres engine. Inside Devagotchi's workspace (this repository as its submodule at
 # crates/agenthub) its root Cargo.toml patches these to its own crates.
 [dependencies]
-devagotchi-contracts = { git = "https://github.com/devagotchi/devagotchi", branch = "main" }
+devagotchi-contracts = { git = "https://github.com/devagotchi/devagotchi", rev = "30ede402ca7d61b689f1a20ee364d69206f0ee98" }
 # A note for "codex" also reaches the names a client is known by (`inbox.rs`).
-devagotchi-connectors = { git = "https://github.com/devagotchi/devagotchi", branch = "main" }
+devagotchi-connectors = { git = "https://github.com/devagotchi/devagotchi", rev = "30ede402ca7d61b689f1a20ee364d69206f0ee98" }
 # The Postgres engine it shares with a host (schema `devagotchi`, tenant RLS); its tables are
 # its own migrations (`migrations/`).
-devagotchi-store = { git = "https://github.com/devagotchi/devagotchi", branch = "main" }
+devagotchi-store = { git = "https://github.com/devagotchi/devagotchi", rev = "30ede402ca7d61b689f1a20ee364d69206f0ee98" }
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls-aws-lc-rs", "postgres", "any", "migrate", "macros"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "io-std", "net", "sync", "signal", "time"] }
 serde = { version = "1", features = ["derive"] }
@@ -46,5 +46,5 @@ percent-encoding = "2"
 [dev-dependencies]
 # A webhook endpoint for the wake tests.
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
-devagotchi-store = { git = "https://github.com/devagotchi/devagotchi", branch = "main", features = ["testing"] }
+devagotchi-store = { git = "https://github.com/devagotchi/devagotchi", rev = "30ede402ca7d61b689f1a20ee364d69206f0ee98", features = ["testing"] }
 tempfile = "3"

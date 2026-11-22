@@ -2,206 +2,10 @@
 //! force-release and the reaper, each one transaction on the database clock.
 
 use super::*;
-use crate::Filter;
 use crate::chain::actions;
+use crate::lease::projection as lease;
 
 impl HostedBoard {
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn clear_lease(
-        &self,
-        connection: &mut AnyConnection,
-        actor: &str,
-        now: i64,
-        ticket: &Ticket,
-        to: &str,
-        action: &str,
-        mut data: serde_json::Value,
-    ) -> DbResult<()> {
-        sqlx::query(
-            "UPDATE board_tickets SET holder=NULL,lease_id=NULL,lease_ttl_ms=NULL,lease_expires_at=NULL,
-             state=$4,version=version+1,updated_at=$5 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
-        ).bind(&self.tenant).bind(&self.project).bind(&ticket.id).bind(to).bind(now)
-            .execute(&mut *connection).await?;
-        data["from"] = serde_json::json!(ticket.state);
-        data["to"] = serde_json::json!(to);
-        self.event(
-            connection,
-            actor,
-            now,
-            action,
-            Some(&ticket.id),
-            Some(ticket.fence),
-            data,
-        )
-        .await
-    }
-
-    pub(super) async fn expire(
-        &self,
-        connection: &mut AnyConnection,
-        actor: &str,
-        now: i64,
-        ticket: &Ticket,
-        workflow: &Workflow,
-        settings: &Settings,
-    ) -> DbResult<()> {
-        let count = ticket.expiry_count + 1;
-        let mut to = crate::lease::release_state(workflow, ticket);
-        if settings.max_lease_expiries > 0 && count >= settings.max_lease_expiries {
-            to = workflow.attention_state.clone();
-        }
-        sqlx::query(
-            "UPDATE board_tickets SET expiry_count=$4 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
-        )
-        .bind(&self.tenant)
-        .bind(&self.project)
-        .bind(&ticket.id)
-        .bind(count)
-        .execute(&mut *connection)
-        .await?;
-        self.clear_lease(
-            connection,
-            actor,
-            now,
-            ticket,
-            &to,
-            actions::LEASE_EXPIRED,
-            serde_json::json!({"previous_holder":ticket.holder,"expiry_count":count}),
-        )
-        .await
-    }
-
-    pub async fn claim(
-        &self,
-        actor: &Actor<'_>,
-        id: &str,
-        ttl_ms: Option<i64>,
-    ) -> BridgeResult<Lease> {
-        transaction!(&self.store, |connection| {
-            let now = self.scope(connection).await?;
-            let workflow: Workflow = self.configuration(connection, "workflow").await?;
-            let settings: Settings = self.configuration(connection, "settings").await?;
-            self.claim_in(connection, actor, id, ttl_ms, now, &workflow, &settings)
-                .await
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn claim_in(
-        &self,
-        connection: &mut AnyConnection,
-        actor: &Actor<'_>,
-        id: &str,
-        ttl_ms: Option<i64>,
-        now: i64,
-        workflow: &Workflow,
-        settings: &Settings,
-    ) -> DbResult<Lease> {
-        let mut ticket = self.ticket(connection, id, workflow, now).await?;
-        if ticket.holder.is_some() && !ticket.lease_expired {
-            if ticket.holder.as_deref() == Some(actor.id) {
-                return Ok(lease(ticket, settings, true)?);
-            }
-            return Err(fail(
-                "held_by_other",
-                format!("{id} is leased by another principal"),
-            )
-            .into());
-        }
-        if ticket.holder.is_some() {
-            self.expire(connection, actor.id, now, &ticket, workflow, settings)
-                .await?;
-            ticket = self.ticket(connection, id, workflow, now).await?;
-        }
-        let lane = workflow.lane_by_queue(&ticket.state).ok_or_else(|| {
-            fail(
-                "not_claimable",
-                format!("state {:?} is not a claimable queue", ticket.state),
-            )
-        })?;
-        if !ticket.blocked_by.is_empty() {
-            return Err(fail(
-                "blocked",
-                format!("waiting on {}", ticket.blocked_by.join(", ")),
-            )
-            .into());
-        }
-        if lane.distinct_from_previous && ticket.last_worker.as_deref() == Some(actor.id) {
-            return Err(fail(
-                "distinct_required",
-                "this lane requires a different principal",
-            )
-            .into());
-        }
-        self.check_wip(connection, actor, settings, now).await?;
-        let ttl = crate::lease::clamp_ttl(settings, ttl_ms);
-        let fence: i64 = sqlx::query_scalar(
-                "UPDATE board_fence SET value=value+1 WHERE tenant_id=$1 AND board_id=$2 AND id=1 RETURNING value",
-            ).bind(&self.tenant).bind(&self.project).fetch_one(&mut *connection).await?;
-        let mut random = [0; 16];
-        getrandom::fill(&mut random).map_err(|error| fail("board_random", error.to_string()))?;
-        sqlx::query(
-            "UPDATE board_tickets SET holder=$4,lease_id=$5,lease_ttl_ms=$6,lease_expires_at=$7,
-                 heartbeat_at=$8,fence=$9,state=$10,version=version+1,updated_at=$8
-                 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
-        )
-        .bind(&self.tenant)
-        .bind(&self.project)
-        .bind(id)
-        .bind(actor.id)
-        .bind(hex::encode(random))
-        .bind(ttl)
-        .bind(now + ttl)
-        .bind(now)
-        .bind(fence)
-        .bind(&lane.active)
-        .execute(&mut *connection)
-        .await?;
-        self.event(connection, actor.id, now, actions::TICKET_CLAIMED, Some(id), Some(fence),
-                serde_json::json!({"from":ticket.state,"to":lane.active,"ttl_ms":ttl,"lease_expires_at":now+ttl})).await?;
-        Ok(lease(
-            self.ticket(connection, id, workflow, now).await?,
-            settings,
-            false,
-        )?)
-    }
-
-    /// Explicit principal limits count across boards; aliases without one use the board
-    /// default. SERIALIZABLE protects this predicate against concurrent claims on other
-    /// boards as well as this board's row lock. Claim and claim-next both ask this.
-    async fn check_wip(
-        &self,
-        connection: &mut AnyConnection,
-        actor: &Actor<'_>,
-        settings: &Settings,
-        now: i64,
-    ) -> DbResult<()> {
-        let limit = actor.wip_limit.unwrap_or(settings.wip_limit_default);
-        if limit <= 0 {
-            return Ok(());
-        }
-        let held: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM board_tickets
-             WHERE tenant_id=$1 AND holder=$3 AND lease_expires_at>$4
-               AND ($5 OR board_id=$2)",
-        )
-        .bind(&self.tenant)
-        .bind(&self.project)
-        .bind(actor.id)
-        .bind(now)
-        .bind(actor.wip_limit.is_some())
-        .fetch_one(&mut *connection)
-        .await?;
-        if held >= limit {
-            return Err(fail(
-                "wip_limit",
-                format!("you already hold {held} ticket(s); the WIP limit is {limit}"),
-            )
-            .into());
-        }
-        Ok(())
-    }
-
     pub async fn heartbeat(
         &self,
         actor: &Actor<'_>,
@@ -214,6 +18,10 @@ impl HostedBoard {
             let workflow = self.configuration(connection, "workflow").await?;
             let settings: Settings = self.configuration(connection, "settings").await?;
             let ticket = self.ticket(connection, id, &workflow, now).await?;
+            let receipt = self.begin_mutation(connection, actor, "heartbeat").await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             crate::lease::check_held(&ticket, actor.id, Some(fence))?;
             let ttl = ticket.lease_ttl_ms.unwrap_or(settings.lease_ttl_ms);
             sqlx::query(
@@ -232,11 +40,12 @@ impl HostedBoard {
                 serde_json::json!({"lease_expires_at":now+ttl,"progress":progress}),
             )
             .await?;
-            Ok(lease(
+            let result = lease(
                 self.ticket(connection, id, &workflow, now).await?,
                 &settings,
                 true,
-            )?)
+            )?;
+            receipt.complete(connection, result).await
         })
     }
 
@@ -251,11 +60,25 @@ impl HostedBoard {
             let now = self.scope(connection).await?;
             let workflow: Workflow = self.configuration(connection, "workflow").await?;
             let ticket = self.ticket(connection, id, &workflow, now).await?;
+            let receipt: Receipt<(Ticket, String)> =
+                self.begin_mutation(connection, actor, "complete").await?;
+            if let Receipt::Replay((saved, action)) = receipt {
+                self.authorize(connection, actor, &action, &ticket.labels)
+                    .await?;
+                return Ok(saved);
+            }
             crate::lease::check_held(&ticket, actor.id, Some(fence))?;
             let to = workflow
                 .lane_by_active(&ticket.state)
                 .map(|lane| lane.complete_to.clone())
-                .unwrap_or_else(|| workflow.initial_state.clone());
+                .ok_or_else(|| fail("not_completable", "this state has no active work stage; repair the workflow before completing"))?;
+            self.authorize(
+                connection,
+                actor,
+                &format!("task.complete:{}", ticket.state),
+                &ticket.labels,
+            )
+            .await?;
             if !summary.trim().is_empty() {
                 self.insert_note(
                     connection,
@@ -290,7 +113,14 @@ impl HostedBoard {
                 serde_json::json!({"summary":!summary.trim().is_empty()}),
             )
             .await?;
-            self.ticket(connection, id, &workflow, now).await
+            let result = self.ticket(connection, id, &workflow, now).await?;
+            receipt
+                .complete(
+                    connection,
+                    (result, format!("task.complete:{}", ticket.state)),
+                )
+                .await
+                .map(|(ticket, _)| ticket)
         })
     }
 
@@ -305,6 +135,10 @@ impl HostedBoard {
             let now = self.scope(connection).await?;
             let workflow = self.configuration(connection, "workflow").await?;
             let ticket = self.ticket(connection, id, &workflow, now).await?;
+            let receipt = self.begin_mutation(connection, actor, "release").await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             crate::lease::check_held(&ticket, actor.id, Some(fence))?;
             self.clear_lease(
                 connection,
@@ -316,61 +150,8 @@ impl HostedBoard {
                 serde_json::json!({"reason":reason}),
             )
             .await?;
-            self.ticket(connection, id, &workflow, now).await
-        })
-    }
-
-    pub async fn claim_next(
-        &self,
-        actor: &Actor<'_>,
-        filter: &crate::NextFilter,
-    ) -> BridgeResult<Option<Lease>> {
-        transaction!(&self.store, |connection| {
-            let now = self.scope(connection).await?;
-            let workflow: Workflow = self.configuration(connection, "workflow").await?;
-            let settings: Settings = self.configuration(connection, "settings").await?;
-            self.check_wip(connection, actor, &settings, now).await?;
-            let list = Filter {
-                label: filter.label.clone(),
-                parent: filter.parent.clone(),
-                limit: Some(25),
-                ..Default::default()
-            };
-            let candidates = self
-                .list_in(connection, &workflow, now, &list, Some(actor.id))
-                .await?;
-            for mut ticket in candidates {
-                if !filter.states.is_empty() && !filter.states.contains(&ticket.state) {
-                    continue;
-                }
-                if ticket.holder.is_some() {
-                    self.expire(connection, actor.id, now, &ticket, &workflow, &settings)
-                        .await?;
-                    ticket = self.ticket(connection, &ticket.id, &workflow, now).await?;
-                }
-                let Some(lane) = workflow.lane_by_queue(&ticket.state) else {
-                    continue;
-                };
-                if !filter.states.is_empty() && !filter.states.contains(&ticket.state) {
-                    continue;
-                }
-                if lane.distinct_from_previous && ticket.last_worker.as_deref() == Some(actor.id) {
-                    continue;
-                }
-                return Ok(Some(
-                    self.claim_in(
-                        connection,
-                        actor,
-                        &ticket.id,
-                        filter.ttl_ms,
-                        now,
-                        &workflow,
-                        &settings,
-                    )
-                    .await?,
-                ));
-            }
-            Ok(None)
+            let result = self.ticket(connection, id, &workflow, now).await?;
+            receipt.complete(connection, result).await
         })
     }
 
@@ -390,6 +171,15 @@ impl HostedBoard {
             let now = self.scope(connection).await?;
             let workflow = self.configuration(connection, "workflow").await?;
             let ticket = self.ticket(connection, id, &workflow, now).await?;
+            self.authorize(connection, actor, "task.handoff", &ticket.labels)
+                .await?;
+            if let Some(to) = to {
+                self.recipient(connection, actor, to).await?;
+            }
+            let receipt = self.begin_mutation(connection, actor, "handoff").await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             crate::lease::check_held(&ticket, actor.id, Some(fence))?;
             self.insert_note(
                 connection,
@@ -403,12 +193,13 @@ impl HostedBoard {
             )
             .await?;
             sqlx::query(
-                "UPDATE board_tickets SET assignee=$4 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
+                "UPDATE board_tickets SET assignee=$4,last_worker=$5 WHERE tenant_id=$1 AND board_id=$2 AND id=$3",
             )
             .bind(&self.tenant)
             .bind(&self.project)
             .bind(id)
             .bind(to)
+            .bind(actor.id)
             .execute(&mut *connection)
             .await?;
             self.clear_lease(
@@ -421,7 +212,8 @@ impl HostedBoard {
                 serde_json::json!({"assignee":to}),
             )
             .await?;
-            self.ticket(connection, id, &workflow, now).await
+            let result = self.ticket(connection, id, &workflow, now).await?;
+            receipt.complete(connection, result).await
         })
     }
 
@@ -441,12 +233,37 @@ impl HostedBoard {
             let now = self.scope(connection).await?;
             let workflow = self.configuration(connection, "workflow").await?;
             let ticket = self.ticket(connection, id, &workflow, now).await?;
+            self.authorize(connection, actor, "task.force_release", &ticket.labels)
+                .await?;
+            let receipt = self
+                .begin_mutation(connection, actor, "force_release")
+                .await?;
+            if let Receipt::Replay(saved) = receipt {
+                return Ok(saved);
+            }
             if ticket.holder.is_none() {
                 return Err(fail("not_held", format!("{id} is not held")).into());
             }
+
+            self.insert_note(
+                connection,
+                actor.id,
+                now,
+                id,
+                "note",
+                &format!(
+                    "Force-released from {}: {}",
+                    ticket.holder.as_deref().unwrap_or_default(),
+                    reason.trim()
+                ),
+                None,
+                None,
+            )
+            .await?;
             self.clear_lease(connection,actor.id,now,&ticket,&crate::lease::release_state(&workflow,&ticket),
                 actions::TICKET_FORCE_RELEASED,serde_json::json!({"previous_holder":ticket.holder,"previous_fence":ticket.fence,"reason":reason.trim()})).await?;
-            self.ticket(connection, id, &workflow, now).await
+            let result = self.ticket(connection, id, &workflow, now).await?;
+            receipt.complete(connection, result).await
         })
     }
 
@@ -475,21 +292,4 @@ impl HostedBoard {
             ).bind(&self.tenant).bind(&self.project).fetch_one(&mut *connection).await?)
         })
     }
-}
-
-fn lease(ticket: Ticket, settings: &Settings, already_held: bool) -> BridgeResult<Lease> {
-    let ttl = ticket.lease_ttl_ms.unwrap_or(settings.lease_ttl_ms);
-    Ok(Lease {
-        fence: ticket.fence,
-        lease_id: ticket
-            .lease_id
-            .clone()
-            .ok_or_else(|| fail("board_damaged", "held ticket has no lease ID"))?,
-        lease_expires_at: ticket
-            .lease_expires_at
-            .ok_or_else(|| fail("board_damaged", "held ticket has no lease expiry"))?,
-        heartbeat_every_ms: crate::lease::beat_every(ttl),
-        already_held,
-        ticket,
-    })
 }

@@ -3,7 +3,7 @@
 use crate::cli::{CommandResult, EXIT_OK, no_id, usage_error, with_id};
 use crate::{AnchorPatch, DepKind, NewTicket, Patch};
 
-use super::{Command, need};
+use super::{Command, need, optional_fence};
 
 /// `board new`: create a ticket.
 pub(super) fn new(c: Command<'_, '_>) -> CommandResult {
@@ -46,6 +46,7 @@ pub(super) fn set(c: Command<'_, '_>) -> CommandResult {
         parsed,
         board,
         actor,
+        cache,
         output,
         ..
     } = c;
@@ -55,6 +56,13 @@ pub(super) fn set(c: Command<'_, '_>) -> CommandResult {
         .map_err(usage_error)?
         .ok_or_else(|| usage_error("--version V is required (board show ID --json)"))?;
     let patch = Patch {
+        fence: optional_fence(parsed, cache, id)?,
+        progress: parsed
+            .flag("--progress")
+            .map(|raw| {
+                serde_json::from_str(raw).map_err(|_| usage_error("--progress must be JSON"))
+            })
+            .transpose()?,
         title: parsed.flag("--title").map(str::to_string),
         description: parsed.flag("--desc").map(str::to_string),
         priority: parsed.int("--priority").map_err(usage_error)?,
