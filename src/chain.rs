@@ -84,7 +84,7 @@ pub mod actions {
 
 pub fn event_hash(prev: &str, event: &Event) -> String {
     // Canonical: fixed field order, no whitespace, the same bytes any verifier recomputes.
-    let canonical = serde_json::json!({
+    let mut canonical = serde_json::json!({
         "seq": event.seq,
         "at": event.at,
         "actor": event.actor,
@@ -93,6 +93,11 @@ pub fn event_hash(prev: &str, event: &Event) -> String {
         "data": event.data,
         "fence": event.fence,
     });
+    // Existing history did not have this field. Keep its original bytes verifiable;
+    // adding, changing or removing a present request identifier changes the hash.
+    if let Some(request_id) = &event.request_id {
+        canonical["request_id"] = serde_json::Value::String(request_id.clone());
+    }
     let mut hasher = Sha256::new();
     hasher.update(prev.as_bytes());
     hasher.update(

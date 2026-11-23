@@ -31,6 +31,10 @@ impl<T: Serialize> Receipt<T> {
 }
 
 impl HostedBoard {
+    pub(super) fn event_request_id(&self) -> Option<&str> {
+        self.mutation.as_ref().map(|request| request.key.as_str())
+    }
+
     /// A request-local copy. The host supplies the authenticated principal and complete
     /// typed input BEFORE adding transport defaults (session ids, remembered fences).
     /// Neither authority nor the principal may come from that input. Never cache this copy.

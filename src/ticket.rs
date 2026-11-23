@@ -196,6 +196,9 @@ pub struct Event {
     pub ticket: Option<String>,
     pub data: serde_json::Value,
     pub fence: Option<i64>,
+    /// The originating adapter request key, when supplied. This is correlation, not authority.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
     pub prev_hash: String,
     pub hash: String,
 }
