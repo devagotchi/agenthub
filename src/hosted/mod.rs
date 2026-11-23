@@ -314,15 +314,17 @@ impl HostedBoard {
             ticket: ticket.map(str::to_string),
             data,
             fence,
+            request_id: self.event_request_id().map(str::to_owned),
             prev_hash: prev.clone(),
             hash: String::new(),
         };
         event.hash = event_hash(&prev, &event);
         sqlx::query(
-            "INSERT INTO board_events (tenant_id,board_id,seq,at,actor,action,ticket,data,fence,prev_hash,hash)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)",
+            "INSERT INTO board_events (tenant_id,board_id,seq,at,actor,action,ticket,data,fence,prev_hash,hash,request_id)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)",
         ).bind(&self.tenant).bind(&self.project).bind(seq).bind(now).bind(actor).bind(action)
             .bind(ticket).bind(event.data.to_string()).bind(fence).bind(prev).bind(&event.hash)
+            .bind(&event.request_id)
             .execute(&mut *connection).await?;
         sqlx::query(
             "INSERT INTO board_outbox (tenant_id,board_id,event_id,kind,payload,created_at)
